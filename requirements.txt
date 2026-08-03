@@ -1,0 +1,4 @@
+requests>=2.31,<3
+Pillow>=10,<13
+# Optional fallback when SerpApi is unavailable:
+ddgs>=9.9,<10

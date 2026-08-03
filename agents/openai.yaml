@@ -1,0 +1,6 @@
+interface:
+  display_name: "Website Image Finder"
+  short_description: "Find and add web images to a website"
+  default_prompt: "Find suitable public-web images for this website, review cached candidate batches, preserve source metadata, optimize the best usable image, add it using the project's existing conventions, and verify the result."
+policy:
+  allow_implicit_invocation: true
