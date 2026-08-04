@@ -46,4 +46,4 @@ if ($LASTEXITCODE -ne 0) {
         throw "Dependency check failed."
     }
 }
-Write-Host "Website Image Finder 0.2.0 is ready. Restart Codex if it is already open."
+Write-Host "Website Image Finder 0.2.1 is ready. Restart Codex if it is already open."

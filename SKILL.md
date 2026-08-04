@@ -33,7 +33,7 @@ py -3 <SKILL_DIR>\scripts\skill.py check
 
 1. Inspect the project's framework and existing image conventions.
 2. Search with a precise query and useful provider-side filters. Add an alternate-language query only when it improves coverage.
-3. In `auto` mode, use SerpApi Google Images when `SERPAPI_API_KEY` or `SERPAPI_KEY` exists; otherwise use DDGS. If SerpApi fails, fall back to DDGS.
+3. In `auto` mode, use SerpApi Google Images when `SERPAPI_API_KEY` or `SERPAPI_KEY` exists; otherwise use DDGS image search with the backends available in the installed DDGS version. If SerpApi fails, fall back to DDGS.
 4. Search results are cached in `results-cache.json`. The first review batch is downloaded separately.
 5. Inspect `contact-sheet-01.jpg` and `candidates-01.json`. The compact candidate file contains the local file, direct image URL, source-page URL, dimensions, and available license metadata.
 6. If no candidate fits, run `more` on the same run directory. It downloads the next cached batch without another image-search API call.
@@ -59,12 +59,15 @@ The search normally asks the provider for up to 60 results and downloads only th
 Useful options:
 
 - `--provider auto|serpapi|ddgs`
+- `--ddgs-backend auto|bing|duckduckgo`
 - `--preferred-domain`, `--allowed-domain`, `--blocked-domain`
 - `--orientation wide|tall|square|any`
 - `--image-type photo|transparent|clipart|lineart|any`
 - `--size small|medium|large|wallpaper|any`
 - `--license commercial-modify|creative-commons|any`
 - `--batch-size 0` to return URLs without downloading images
+
+DDGS backend availability varies by version. The search cache records `ddgs_version`, `requested_backend`, and `actual_sources`. Never infer the actual source from the CLI parameter. An explicitly requested backend must fail if DDGS returns results from another engine; `auto` mode must be described as DDGS image search using the backends available in the installed DDGS version.
 
 URLs-only mode writes `urls.json`:
 

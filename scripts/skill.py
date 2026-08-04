@@ -45,7 +45,7 @@ def main() -> int:
         print("Usage: python skill.py {search|more|finalize|check} [arguments...]")
         return 0
     if sys.argv[1] in {"-V", "--version"}:
-        print("0.2.0")
+        print("0.2.1")
         return 0
     command = sys.argv[1]
     if command == "check":

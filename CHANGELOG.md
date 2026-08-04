@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1
+
+- Record the installed DDGS version, requested backend, and actual image-search sources in `results-cache.json`.
+- Verify the DDGS engine actually used instead of assuming the CLI backend request was honored.
+- Fail clearly when an explicitly requested DDGS backend returns results from another engine.
+- Report `auto` mode as DDGS image search using the backends available in the installed DDGS version.
+- Label DDGS candidates by the provider actually used rather than the requested backend.
+
 ## 0.2.0
 
 - Fixed command dispatch on Windows when Python is installed under a path containing spaces.

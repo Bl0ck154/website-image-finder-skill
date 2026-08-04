@@ -12,6 +12,7 @@ import tempfile
 import warnings
 from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
+from importlib.metadata import PackageNotFoundError, version as package_version
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Iterable
@@ -33,10 +34,11 @@ from common import (
     validate_remote_url_syntax,
 )
 
-USER_AGENT = "WebsiteImageFinder/0.2.0 (+Agent Skill; image asset research)"
+USER_AGENT = "WebsiteImageFinder/0.2.1 (+Agent Skill; image asset research)"
 SERPAPI_ENDPOINT = "https://serpapi.com/search.json"
 MAX_REDIRECTS = 5
 CACHE_FILENAME = "results-cache.json"
+DDGS_SOURCE_NAMES = {"bing": "Bing", "duckduckgo": "DuckDuckGo"}
 
 
 @dataclass
@@ -73,6 +75,14 @@ class Candidate:
     batch: int | None = None
 
 
+@dataclass
+class DdgsSearchBatch:
+    candidates: list[Candidate]
+    ddgs_version: str
+    requested_backend: str
+    actual_sources: list[str]
+
+
 def candidate_from_dict(payload: dict[str, Any]) -> Candidate:
     allowed = {item.name for item in fields(Candidate)}
     return Candidate(**{key: value for key, value in payload.items() if key in allowed})
@@ -87,6 +97,62 @@ def int_or_none(value: Any) -> int | None:
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def installed_ddgs_version() -> str | None:
+    try:
+        return package_version("ddgs")
+    except PackageNotFoundError:
+        return None
+
+
+def canonical_ddgs_source(value: Any) -> str | None:
+    normalized = re.sub(r"[^a-z]", "", str(value or "").casefold())
+    if normalized.startswith("duckduckgo"):
+        return "DuckDuckGo"
+    if normalized.startswith("bing"):
+        return "Bing"
+    return None
+
+
+def detect_ddgs_actual_sources(client: Any, raw_results: list[dict[str, Any]]) -> list[str]:
+    """Report the engines DDGS actually instantiated; use result source only as a compatibility fallback."""
+    engine_sources: list[str] = []
+    engine_cache = getattr(client, "_engines_cache", None)
+    if isinstance(engine_cache, dict):
+        for engine in engine_cache.values():
+            source = canonical_ddgs_source(getattr(engine, "name", None) or type(engine).__name__)
+            if source and source not in engine_sources:
+                engine_sources.append(source)
+    if engine_sources:
+        return engine_sources
+
+    result_sources: list[str] = []
+    for item in raw_results:
+        source = canonical_ddgs_source(item.get("source"))
+        if source and source not in result_sources:
+            result_sources.append(source)
+    return result_sources or ["Unknown"]
+
+
+def merge_unique(target: list[str], values: Iterable[str]) -> None:
+    for value in values:
+        if value not in target:
+            target.append(value)
+
+
+def ddgs_backend_mismatch_error(requested_backend: str, ddgs_version: str | None, actual_sources: list[str]) -> str | None:
+    if requested_backend == "auto" or not actual_sources:
+        return None
+    expected = DDGS_SOURCE_NAMES[requested_backend]
+    if actual_sources == [expected]:
+        return None
+    actual = ", ".join(actual_sources)
+    return (
+        f"Requested DDGS backend '{requested_backend}', but DDGS {ddgs_version or 'unknown'} returned\n"
+        f"{actual} results. This DDGS version does not provide a working\n"
+        f"{expected} Images backend."
+    )
 
 
 def slugify(value: str, max_len: int = 64) -> str:
@@ -205,7 +271,7 @@ def make_candidate(provider: str, query: str, position: int, item: dict[str, Any
     return Candidate(
         id=f"img-{key}",
         rank=position,
-        provider=f"ddgs-{str(item.get('source') or 'auto').lower()}",
+        provider="ddgs-images",
         provider_position=position,
         queries=[query],
         title=str(item.get("title") or "").strip(),
@@ -320,7 +386,7 @@ def search_ddgs(
     size: str,
     color: str,
     time_limit: str,
-) -> list[Candidate]:
+) -> DdgsSearchBatch:
     try:
         from ddgs import DDGS
     except ImportError as exc:
@@ -347,13 +413,20 @@ def search_ddgs(
     if time_limit != "any":
         kwargs["timelimit"] = time_limit
 
-    raw = DDGS(timeout=20).images(**kwargs)
+    client = DDGS(timeout=20)
+    raw = client.images(**kwargs)
+    actual_sources = detect_ddgs_actual_sources(client, raw)
     output: list[Candidate] = []
     for position, item in enumerate(raw, 1):
         candidate = make_candidate("ddgs", query, position, item)
         if candidate:
             output.append(candidate)
-    return output
+    return DdgsSearchBatch(
+        candidates=output,
+        ddgs_version=installed_ddgs_version() or "unknown",
+        requested_backend=backend,
+        actual_sources=actual_sources,
+    )
 
 
 def score_candidate(candidate: Candidate, preferred_domains: list[str], orientation: str) -> float:
@@ -958,6 +1031,14 @@ def main() -> int:
         warnings_list: list[str] = []
         providers_used: list[str] = []
         secrets = [api_key]
+        ddgs_version_value = installed_ddgs_version()
+        ddgs_actual_sources: list[str] = []
+
+        def record_ddgs_batch(batch: DdgsSearchBatch) -> list[Candidate]:
+            nonlocal ddgs_version_value
+            ddgs_version_value = batch.ddgs_version
+            merge_unique(ddgs_actual_sources, batch.actual_sources)
+            return batch.candidates
 
         for query in queries:
             query_results: list[Candidate] = []
@@ -967,11 +1048,11 @@ def main() -> int:
                     if provider_for_query == "serpapi":
                         found = search_serpapi(session, query, api_key, args.max_results, args.region, page, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit)
                     else:
-                        found = search_ddgs(query, args.max_results, args.region, page, args.ddgs_backend, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit)
+                        found = record_ddgs_batch(search_ddgs(query, args.max_results, args.region, page, args.ddgs_backend, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit))
                     if provider_for_query not in providers_used:
                         providers_used.append(provider_for_query)
                     if provider_for_query == "serpapi" and not found and not args.no_provider_fallback and requested_provider == "auto":
-                        fallback_found = search_ddgs(query, args.max_results, args.region, page, args.ddgs_backend, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit)
+                        fallback_found = record_ddgs_batch(search_ddgs(query, args.max_results, args.region, page, args.ddgs_backend, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit))
                         if "ddgs" not in providers_used:
                             providers_used.append("ddgs")
                         query_results.extend(fallback_found)
@@ -983,7 +1064,7 @@ def main() -> int:
                     if provider_for_query == "serpapi" and not args.no_provider_fallback and requested_provider == "auto":
                         provider_for_query = "ddgs"
                         try:
-                            found = search_ddgs(query, args.max_results, args.region, page, args.ddgs_backend, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit)
+                            found = record_ddgs_batch(search_ddgs(query, args.max_results, args.region, page, args.ddgs_backend, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit))
                             if "ddgs" not in providers_used:
                                 providers_used.append("ddgs")
                             query_results.extend(found)
@@ -1018,6 +1099,9 @@ def main() -> int:
             "created_at": now_iso(),
             "requested_provider": requested_provider,
             "providers_used": providers_used,
+            "ddgs_version": ddgs_version_value,
+            "requested_backend": args.ddgs_backend,
+            "actual_sources": ddgs_actual_sources,
             "queries": queries,
             "search_settings": {
                 "region": args.region,
@@ -1034,6 +1118,7 @@ def main() -> int:
                 "preferred_domains": preferred_domains,
                 "allowed_domains": allowed_domains,
                 "blocked_domains": blocked_domains,
+                "ddgs_backend": args.ddgs_backend,
             },
             "download_settings": download_settings,
             "warnings": warnings_list,
@@ -1042,6 +1127,17 @@ def main() -> int:
         }
         cache_path = out_dir / CACHE_FILENAME
         write_cache(cache_path, cache_payload, candidates)
+
+        backend_error = ddgs_backend_mismatch_error(args.ddgs_backend, ddgs_version_value, ddgs_actual_sources)
+        if ddgs_actual_sources:
+            if args.ddgs_backend == "auto":
+                print("DDGS image search using the backends available in the installed DDGS version.")
+            print(f"Requested backend: {args.ddgs_backend}")
+            source_label = "Actual source" if len(ddgs_actual_sources) == 1 else "Actual sources"
+            print(f"{source_label}: {', '.join(ddgs_actual_sources)}")
+        if backend_error:
+            print(f"Search cache: {cache_path}")
+            raise SkillError(backend_error)
 
         batch_candidates: list[Candidate] = []
         attempts = 0

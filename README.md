@@ -2,13 +2,13 @@
 
 A lightweight Agent Skill for finding, reviewing, optimizing, and integrating public-web images into website projects.
 
-It supports Google Images through SerpApi and an optional DDGS fallback for Bing/DuckDuckGo. Search results are cached once, while image candidates are reviewed in additional batches without repeating the search API request.
+It supports Google Images through SerpApi and DDGS image search as the no-key fallback. Search results are cached once, while image candidates are reviewed in additional batches without repeating the search API request.
 
 ## Highlights
 
 - Provider-side filters for layout, size, type, color, time, license, and domains
 - Google Images through SerpApi
-- Optional DDGS fallback without an API key
+- DDGS / DuckDuckGo Images fallback without an API key
 - Local `results-cache.json` for resume and provenance
 - Review batches via compact `candidates-XX.json`
 - Dense justified `contact-sheet-XX.jpg` previews
@@ -42,6 +42,31 @@ Check the installation:
 ```powershell
 py -3 "$env:USERPROFILE\.agents\skills\website-image-finder\scripts\skill.py" check
 ```
+
+## DDGS backend verification
+
+DDGS backend availability varies by DDGS version. The skill verifies the actual source returned and does not assume that a requested backend was honored.
+
+The provider chain is:
+
+```text
+SerpApi Google Images
+  -> DDGS image search when no SerpApi key is configured or the SerpApi request fails
+```
+
+DDGS is one fallback provider, not a promise of two independent Bing and DuckDuckGo fallbacks. `--ddgs-backend bing` remains available for DDGS versions that actually provide Bing Images. If the installed DDGS version substitutes another engine, the command records the mismatch and exits with an error.
+
+The search cache records runtime provenance:
+
+```json
+{
+  "ddgs_version": "9.14.4",
+  "requested_backend": "bing",
+  "actual_sources": ["DuckDuckGo"]
+}
+```
+
+In `auto` mode, output describes the behavior as: `DDGS image search using the backends available in the installed DDGS version.`
 
 ## Example
 
