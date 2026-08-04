@@ -1,5 +1,7 @@
 # Website Image Finder — Agent Skill
 
+[![skills.sh](https://skills.sh/b/Bl0ck154/website-image-finder-skill)](https://skills.sh/Bl0ck154/website-image-finder-skill)
+
 A lightweight Agent Skill for finding, reviewing, optimizing, and integrating public-web images into website projects.
 
 It supports Google Images through SerpApi and DDGS image search as the no-key fallback. Search results are cached once, while image candidates are reviewed in additional batches without repeating the search API request.
