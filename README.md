@@ -6,6 +6,9 @@ A lightweight Agent Skill for finding, reviewing, optimizing, and integrating pu
 
 It supports Google Images through SerpApi and DDGS image search as the no-key fallback. Search results are cached once, while image candidates are reviewed in additional batches without repeating the search API request.
 
+<p align="center"><img src="assets/workflow.gif" alt="Illustrated workflow: image search, candidate review, cache reuse and optimized export" width="800" /></p>
+<p align="center"><sub>Illustrative walkthrough with synthetic placeholders, not live search results. Verify image reuse rights before publication.</sub></p>
+
 ## Highlights
 
 - Provider-side filters for layout, size, type, color, time, license, and domains
