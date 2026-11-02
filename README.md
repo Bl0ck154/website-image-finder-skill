@@ -21,7 +21,17 @@ It supports Google Images through SerpApi and DDGS image search as the no-key fa
 
 ## Install
 
-Copy the `website-image-finder` directory to:
+### Using the Skills CLI (recommended)
+
+```sh
+npx skills add Bl0ck154/website-image-finder-skill
+```
+
+Choose your AI coding agent when prompted. Install the Python dependencies from the resulting skill directory with `python -m pip install -r requirements.txt`. The Skills CLI installs the skill files; it does not replace the Python dependencies used by its scripts.
+
+### Manual installation
+
+Copy the repository contents into a directory named `website-image-finder` at:
 
 ```text
 ~/.agents/skills/website-image-finder
@@ -111,3 +121,7 @@ This is an independent community project and is not an official OpenAI product.
 ## License
 
 MIT
+
+## Contributing
+
+Bug reports and improvements are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for local checks and privacy guidelines.
