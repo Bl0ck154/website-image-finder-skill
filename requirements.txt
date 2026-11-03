@@ -1,4 +1,4 @@
 requests>=2.31,<3
 Pillow>=10,<13
 # Optional no-key public web image search backend:
-ddgs>=9.9,<10
+ddgs>=9.16.1,<10
