@@ -1,0 +1,38 @@
+name: Bug report
+description: A reproducible failure while finding or preparing website images
+title: "Bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: "Remove private URLs, signed image links, API keys, and tokens from logs before posting. Full search caches are not needed."
+  - type: input
+    id: version
+    attributes:
+      label: Skill version
+      placeholder: "0.5.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: action
+    attributes:
+      label: Affected command
+      options: [setup, search, more, review, finalize, evaluate, other]
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce and sanitized error
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Operating system, Python version, AI agent

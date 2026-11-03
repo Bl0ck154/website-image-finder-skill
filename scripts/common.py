@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 SECRET_NAMES = ("SERPAPI_API_KEY", "SERPAPI_KEY")
 
 

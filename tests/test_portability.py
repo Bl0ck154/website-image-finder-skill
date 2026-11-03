@@ -173,6 +173,7 @@ class ProviderTests(unittest.TestCase):
              mock.patch.dict("os.environ", {"SERPAPI_API_KEY": "", "SERPAPI_KEY": ""}), \
              mock.patch.object(image_search, "create_session", return_value=Session()), \
              mock.patch.object(image_search, "search_ddgs", side_effect=RuntimeError("blocked")), \
+             mock.patch.object(image_search, "provider_order", return_value=["ddgs"]), \
              mock.patch.object(image_search, "search_openverse") as fallback, \
              mock.patch.object(sys, "argv", [
                  "image_search.py", "office", "--root", root, "--batch-size", "0",

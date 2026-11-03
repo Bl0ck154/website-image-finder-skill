@@ -14,10 +14,11 @@ Use this skill to find existing images and prepare traceable web assets. Follow 
 1. Inspect the website project, current assets, desired image placement, aspect ratio and image formats.
 2. Run the bundled Python launcher (from the installed skill directory). It prepares missing packages in an isolated Python environment on the first image command. Let the user approve any package installation if the agent requires approval.
 3. Search through free providers first. In `auto` mode, DDGS is used if available; otherwise Openverse is the primary. Openverse and Wikimedia Commons are keyless fallbacks. If a commercial/Creative Commons filter is explicitly requested, use Openverse rather than silently weakening the license constraint.
-4. Inspect the `contact-sheet-01.jpg` grid together with `candidates-01.json` and the original source page. Reject watermarks, low resolution, duplicates, irrelevant images and unclear rights.
-5. If necessary use `more` to download another batch from the saved results without repeating provider search.
+4. Inspect the `contact-sheet-01.jpg` grid together with `candidates-01.json` and the generated `review-batch-01.json`. The technical shortlist scores resolution, aspect ratio and source metadata, but cannot judge visual relevance or license rights. Review the images and their original source pages.
+5. If necessary use `more` to download another batch from saved results without repeating provider search; each new batch gets its own technical shortlist. Run `review` to rank all downloaded candidates together.
 6. Finalize the selected image in the website's preferred directory/format (usually WebP). Add useful alt text and verify that the rendered page looks correct.
 7. Keep private metadata under `.image-search/provenance/`. Keep `.image-search/` out of git commits and public web hosting; do not delete provenance when cleaning temporary downloads.
+8. If a user asks how the tool performs, use `evaluate` to summarize saved search metrics. Do not claim measured artistic quality or user time savings from these operational numbers.
 
 ## Portable commands
 
@@ -26,6 +27,7 @@ macOS / Linux (replace `<SKILL_DIR>` with this skill's installed directory):
 ```sh
 python3 <SKILL_DIR>/scripts/skill.py search "modern bright kitchen" --root . --orientation wide --batch-size 12
 python3 <SKILL_DIR>/scripts/skill.py more --root . --run .image-search/<run> --count 12
+python3 <SKILL_DIR>/scripts/skill.py review --root . --run .image-search/<run> --top 5
 python3 <SKILL_DIR>/scripts/skill.py finalize --root . --cache .image-search/<run>/results-cache.json --candidate 7 --output public/images/kitchen.webp
 ```
 
@@ -43,7 +45,8 @@ The first run may install the pinned-compatible packages in `requirements.txt` w
 - Use `--no-provider-fallback` to restrict automatic searching to the primary free backend.
 - Same searches reuse cached provider results for 24 hours by default. Use `--reuse-cache-hours 0` for a fresh query.
 - Use `--batch-size 0` for URLs only. It writes `urls.json` without downloading candidates; `more` can download later if the cache has results.
-- Search results are stored under `.image-search/<run>/`. A completed download batch writes `candidates-XX.json` and `contact-sheet-XX.jpg`. These are local, private working files.
+- Search results are stored under `.image-search/<run>/`. A completed download batch writes `candidates-XX.json`, `contact-sheet-XX.jpg` and `review-batch-XX.json`. These are private working files. The shortlist uses deterministic metadata, not AI vision.
+- `evaluate --root . --latest 10` reports saved operational data without another provider call. Old caches may lack timing and request counts.
 
 ## Failure and fallback handling
 

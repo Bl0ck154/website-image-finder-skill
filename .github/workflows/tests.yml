@@ -41,6 +41,8 @@ jobs:
         run: |
           python scripts/skill.py --version
           python scripts/skill.py check
+          python scripts/skill.py review --help
+          python scripts/skill.py evaluate --help
       - name: Test first-use dependency bootstrap
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'
         env:
@@ -48,4 +50,6 @@ jobs:
         run: |
           python scripts/skill.py setup
           python scripts/skill.py check
+          python scripts/skill.py review --help
+          python scripts/skill.py evaluate --help
 
