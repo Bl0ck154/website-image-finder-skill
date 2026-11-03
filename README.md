@@ -3,9 +3,9 @@
 [![skills.sh](https://skills.sh/b/Bl0ck154/website-image-finder-skill)](https://skills.sh/Bl0ck154/website-image-finder-skill)
 [![Tests](https://github.com/Bl0ck154/website-image-finder-skill/actions/workflows/tests.yml/badge.svg)](https://github.com/Bl0ck154/website-image-finder-skill/actions/workflows/tests.yml)
 
-Find **real web images for websites with AI coding agents**. Search, compare candidate previews, remove duplicates, optimize website assets, and keep the original source information private.
+Find real web images for websites with AI coding agents. Review candidate grids, reuse search results, export optimized assets, and keep image-source details traceable.
 
-Works with compatible Agent Skills clients (including Claude Code, Codex, Cursor, and other coding agents that can run Python with network access). Search through Google Images (SerpApi), DDGS, or **Openverse**. No paid search key is required when using DDGS or Openverse. Results can be reviewed in batches without repeating provider searches.
+Works with compatible Agent Skills clients, including Claude Code, Codex and Cursor. **Free sources are the default; Google Images through SerpApi is optional and never selected automatically.**
 
 <p align="center"><img src="assets/workflow.gif" alt="Illustrated workflow: image search, candidate review, cache reuse and optimized export" width="800" /></p>
 <p align="center"><sub>Illustrative walkthrough with synthetic placeholders, not live search results. Verify image reuse rights before publication.</sub></p>
@@ -13,94 +13,64 @@ Works with compatible Agent Skills clients (including Claude Code, Codex, Cursor
 ## Highlights
 
 - Provider filters for layout, size, type, color, time and license; domain allow/block lists are applied locally after search
-- Google Images through SerpApi
-- DDGS / DuckDuckGo Images with Openverse as a fallback, without an API key
+- Google Images through explicitly selected SerpApi
+- Keyless DDGS, Openverse and Wikimedia Commons discovery
 - Openverse for license-oriented image discovery (not automatic legal clearance)
-- Local `results-cache.json` for resume and provenance, with opt-in reuse across runs
+- Local `results-cache.json` for resume and provenance; cross-run search reuse defaults to 24 hours
 - Review batches via compact `candidates-XX.json`
 - Dense justified `contact-sheet-XX.jpg` previews
 - Next-batch downloads without another search-provider call
 - Actual file validation, minimum dimensions, size limits, and duplicate filtering
 - WebP/PNG/JPEG finalization with **private**, gitignored source metadata
 - Explicit SerpApi request budget and sensible exit codes
-- Python 3.10+; supports existing environments or virtual environments
+- Python 3.10+; prepares isolated dependencies automatically on first use
 
-## Install
+## Install and try it
 
-### Using the Skills CLI (recommended)
+Install the Agent Skill in a supported coding agent:
 
 ```sh
 npx skills add Bl0ck154/website-image-finder-skill
 ```
 
-Choose your AI coding agent when prompted. The Skills CLI installs the skill files but **not** their Python dependencies. If your Python environment permits package installation, run `python -m pip install -r <SKILL_DIR>/requirements.txt` with the same Python executable your agent uses for this skill.
+Then ask your agent:
 
-For an isolated Python environment on Linux/macOS, substitute the actual installed skill directory:
+> Use website-image-finder to find a suitable, reusable photograph for my homepage. Show candidates, optimize the best one to WebP, and add it to my project.
+
+**Requirements:** Python 3.10+ and internet access. Node.js is needed for the optional `npx skills` installer. The skill itself is Python-based. On the first image command, its launcher checks the required libraries. If they're missing, it installs them into an **isolated local Python environment** and reuses that environment next time. No SerpApi subscription or login is required.
+
+The launcher installs published packages listed in `requirements.txt` from PyPI. Set `WEBSITE_IMAGE_FINDER_AUTO_SETUP=0` to disable automatic package installation; alternatively run `python3 <SKILL_DIR>/scripts/skill.py setup` deliberately first. Package installation needs PyPI access and permission to write to a user cache or project directory.
+
+Run manually, using the actual installed skill directory:
+
 ```sh
-SKILL_DIR="$HOME/.agents/skills/website-image-finder"
-python3 -m venv "$SKILL_DIR/.venv"
-"$SKILL_DIR/.venv/bin/python" -m pip install -r "$SKILL_DIR/requirements.txt"
-"$SKILL_DIR/.venv/bin/python" "$SKILL_DIR/scripts/skill.py" check
+python3 <SKILL_DIR>/scripts/skill.py search "sunlit modern living room" --root . --orientation wide --batch-size 12
 ```
 
-When using an isolated environment, instruct your AI agent to invoke the skill using that environment's Python. On Windows, use `$SKILL_DIR\.venv\Scripts\python.exe` for a virtual environment, or the included PowerShell installer for a user-wide installation.
+On Windows use `py -3` instead of `python3`. You can use `python3 <SKILL_DIR>/scripts/skill.py check` to inspect setup and `setup` to prepare it. On Linux and macOS, a user-wide package install is unnecessary.
 
-### Manual installation
+**If Python is unavailable or the agent cannot install packages:** the skill instructions allow a limited fallback through the agent's own web/image search tools, if provided. That fallback cannot promise contact sheets, local optimization, or metadata files.
 
-Copy the repository contents into a directory named `website-image-finder` at:
+## How free image search works
 
-```text
-~/.agents/skills/website-image-finder
-```
+| Provider | API key | Default selection | Trade-off |
+| --- | --- | --- | --- |
+| DDGS | No | First for general web images when installed | Unofficial search aggregation; sites can rate-limit or block it; usage rights are not verified |
+| Openverse | No | First for license-oriented searches; otherwise free fallback | Search limited to openly licensed media; anonymous API rate limits |
+| Wikimedia Commons | No | Last keyless fallback for general searches | Broad public media collection; may contain non-photo media; no provider-side safe-search |
+| SerpApi Google Images | **Yes** | **Only with `--provider serpapi`** | Optional paid search credits, useful when specific Google Image results are required |
 
-On Windows, run:
+Automatic mode **never calls SerpApi**, even if `SERPAPI_API_KEY` is already set in the environment. You must explicitly request `--provider serpapi` to spend its credits. Queries with `--license creative-commons`, `commercial`, `modify`, or `commercial-modify` use Openverse in automatic mode instead of falling back to sources with uncertain license filters.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\.agents\skills\website-image-finder\install.ps1"
-```
+The default search-result cache duration is 24 hours, preventing identical searches from repeatedly calling providers. Use `--reuse-cache-hours 0` to force fresh results. A cache match includes the query, filters, provider policy, and selected provider. Actual candidate downloads still require network access.
 
-For SerpApi only, without DDGS:
+External services have their own rate limits and can become unavailable. The skill does not bypass authentication, CAPTCHAs, robots policies, or access controls. Metadata must be checked against the image's original license and attribution requirements before publication. See the [Openverse API](https://api.openverse.org/v1/), [DDGS](https://pypi.org/project/ddgs/) and [Wikimedia API policy](https://www.mediawiki.org/wiki/Wikimedia_APIs/Access_policy).
 
-```powershell
-powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\.agents\skills\website-image-finder\install.ps1" -SerpApiOnly
-```
+## Supported skill environments
 
-Check the installation:
+The project follows the [Agent Skills specification](https://agentskills.io/specification) and ships a root `SKILL.md` plus scripts and documentation. Claude Code, Codex, Cursor and other compatible agents can load it, provided they can execute Python and access the network. Skill recognition does not automatically give agents file-write permission.
 
-```powershell
-py -3 "$env:USERPROFILE\.agents\skills\website-image-finder\scripts\skill.py" check
-```
-
-## DDGS backend verification
-
-DDGS backend availability varies by DDGS version. The skill verifies the actual source returned and does not assume that a requested backend was honored.
-
-The provider selection in `--provider auto` mode is:
-
-```text
---license creative-commons -> Openverse
-Other searches:
-  SerpApi Google Images (when an API key exists)
-    -> DDGS (on failures / no results)
-    -> Openverse (when DDGS fails or returns no results)
-Without an API key: DDGS -> Openverse
-```
-
-You may select `--provider openverse` directly. It provides license metadata and uses public API endpoints without a key. Unsupported provider filters fail rather than being silently ignored. Explicit provider choices do not fall back; `--no-provider-fallback` also disables automatic fallback.
-
-DDGS is one fallback provider, not a promise of two independent Bing and DuckDuckGo fallbacks. `--ddgs-backend bing` remains available for DDGS versions that actually provide Bing Images. If the installed DDGS version substitutes another engine, the command records the mismatch and exits with an error.
-
-The search cache records runtime provenance, including the actual DDGS engine used:
-
-```json
-{
-  "ddgs_version": "9.14.4",
-  "requested_backend": "bing",
-  "actual_sources": ["DuckDuckGo"]
-}
-```
-
-In `auto` mode, output describes the behavior as: `DDGS image search using the backends available in the installed DDGS version.`
+Manual installation: copy the repository to a folder named `website-image-finder` under the skill directory supported by your agent (for example `~/.agents/skills/website-image-finder` for Codex). The folder name should match the `name` in `SKILL.md`. Use the entire repository, not just the Markdown file.
 
 ## Example
 
@@ -134,9 +104,9 @@ py -3 <SKILL_DIR>\scripts\skill.py more --root . --run .image-search\<run> --cou
 
 This uses the existing cache and creates the next batch without calling any search provider again.
 
-To reuse matching search results between separate runs (with identical queries, filters and provider selection), add `--reuse-cache-hours 24` to `search`. This reuses search **metadata**, not old downloaded images. It is opt-in; `0` disables reuse. The default region is `auto` instead of a country-specific locale.
+Matching results are reused for 24 hours by default (same queries, filters and provider policy). This reuses search **metadata**, not old downloaded images. Use `--reuse-cache-hours 0` for a fresh search. The default region is `auto` instead of a country-specific locale.
 
-For SerpApi, at most three search requests per run are allowed by default. Multi-query or multi-page searches can raise the cap explicitly with `--max-serpapi-requests N` (up to 15). Each SerpApi page can consume a search credit.
+For explicitly selected SerpApi, at most three search requests per run are allowed by default. Multi-query or multi-page searches can raise the cap with `--max-serpapi-requests N` (up to 15). Each SerpApi page can consume a search credit.
 
 If downloads fail, `search` reports exit code `3` rather than incorrectly claiming complete success; `--batch-size 0` still succeeds when URLs are found. `more` also returns `3` if no additional usable candidates are produced.
 
