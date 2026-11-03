@@ -26,7 +26,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--root", default=".", help="Project root; run directory must stay inside it")
     parser.add_argument("--count", type=int, default=12, help="Number of additional unique candidates to download")
     parser.add_argument("--max-attempts", type=int, default=30, help="Maximum additional network download attempts")
-    parser.add_argument("--retry-failed", action="store_true", help="Retry previously failed or too-small candidates")
+    parser.add_argument("--retry-failed", action="store_true", help="Retry failed and too-small candidates (use size overrides if needed)")
+    parser.add_argument("--min-width", type=int, help="Override cached minimum width for this batch")
+    parser.add_argument("--min-height", type=int, help="Override cached minimum height for this batch")
     return parser.parse_args()
 
 
@@ -60,13 +62,20 @@ def main() -> int:
         cache_path = run_dir / CACHE_FILENAME
         payload = load_cache(cache_path)
         candidates = [candidate_from_dict(item) for item in payload["results"] if isinstance(item, dict)]
+        settings = dict(payload["download_settings"])
+        for key in ("min_width", "min_height"):
+            value = getattr(args, key)
+            if value is not None:
+                if value < 1:
+                    raise SkillError(f"--{key.replace('_', '-')} must be positive")
+                settings[key] = value
 
         session = create_session()
         downloaded, attempts = download_next_batch(
             session,
             candidates,
             run_dir,
-            payload["download_settings"],
+            settings,
             args.count,
             args.max_attempts,
             retry_failed=args.retry_failed,
@@ -83,7 +92,7 @@ def main() -> int:
             print("No additional downloadable candidates were produced from the existing cache.")
             print(f"Remaining unattempted: {summary['remaining_unattempted']}")
             print(f"Search cache: {cache_path}")
-            return 0
+            return 3
 
         print("Search provider calls: 0")
         print(f"Downloaded in new batch: {len(downloaded)} ({attempts} network attempts)")

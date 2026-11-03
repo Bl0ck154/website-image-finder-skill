@@ -28,6 +28,9 @@ function Find-Python {
     throw "Python 3.10 or newer was not found."
 }
 
+if ($SerpApiOnly -and -not ($env:SERPAPI_API_KEY -or $env:SERPAPI_KEY)) {
+    throw "SerpApi-only installation requires SERPAPI_API_KEY or SERPAPI_KEY."
+}
 $Python = Find-Python
 $PythonArgs = [string[]]$Python.Args
 $Packages = @("requests>=2.31,<3", "Pillow>=10,<13")
@@ -46,4 +49,4 @@ if ($LASTEXITCODE -ne 0) {
         throw "Dependency check failed."
     }
 }
-Write-Host "Website Image Finder 0.2.1 is ready. Restart Codex if it is already open."
+Write-Host "Website Image Finder 0.3.0 is ready. Restart your AI coding agent if it is already open."

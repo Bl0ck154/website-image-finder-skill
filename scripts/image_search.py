@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import math
 import os
 import re
@@ -11,7 +12,7 @@ import sys
 import tempfile
 import warnings
 from dataclasses import asdict, dataclass, field, fields
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from importlib.metadata import PackageNotFoundError, version as package_version
 from io import BytesIO
 from pathlib import Path
@@ -36,6 +37,7 @@ from common import (
 
 USER_AGENT = "WebsiteImageFinder/0.2.1 (+Agent Skill; image asset research)"
 SERPAPI_ENDPOINT = "https://serpapi.com/search.json"
+OPENVERSE_ENDPOINT = "https://api.openverse.org/v1/images/"
 MAX_REDIRECTS = 5
 CACHE_FILENAME = "results-cache.json"
 DDGS_SOURCE_NAMES = {"bing": "Bing", "duckduckgo": "DuckDuckGo"}
@@ -163,11 +165,13 @@ def slugify(value: str, max_len: int = 64) -> str:
     return (ascii_slug or "image")[:max_len].rstrip("-")
 
 
-def region_to_google(region: str) -> tuple[str, str]:
+def region_to_google(region: str) -> tuple[str | None, str | None]:
     normalized = region.strip().lower().replace("_", "-")
+    if normalized == "auto":
+        return None, None
     match = re.fullmatch(r"([a-z]{2})-([a-z]{2,3})", normalized)
     if not match:
-        raise SkillError("region must look like lt-lt, ua-uk, or us-en")
+        raise SkillError("region must be auto or look like lt-lt, ua-uk, or us-en")
     return match.group(1), match.group(2)
 
 
@@ -184,6 +188,8 @@ def serpapi_license(value: str) -> str | None:
 
 
 def ddgs_license(value: str) -> str | None:
+    if value == "creative-commons":
+        raise SkillError("DDGS cannot guarantee a Creative Commons license filter; use --provider openverse")
     if value == "commercial-other":
         raise SkillError("DDGS has no equivalent for the SerpApi 'commercial-other' license filter")
     return {
@@ -192,7 +198,7 @@ def ddgs_license(value: str) -> str | None:
         "commercial": "ShareCommercially",
         "modify": "Modify",
         "commercial-modify": "ModifyCommercially",
-        "creative-commons": "any",
+        "creative-commons": None,
         "commercial-other": None,
     }[value]
 
@@ -285,6 +291,33 @@ def make_candidate(provider: str, query: str, position: int, item: dict[str, Any
     )
 
 
+def make_openverse_candidate(query: str, position: int, item: dict[str, Any]) -> Candidate | None:
+    """Normalize Openverse image results without treating licenses as verified reuse permission."""
+    try:
+        image_url = safe_result_url(item.get("url"), required=True)
+    except SkillError:
+        return None
+    page_url = safe_result_url(item.get("foreign_landing_url") or item.get("detail_url"))
+    key = hashlib.sha1(canonical_url(image_url).encode("utf-8", "replace")).hexdigest()[:12]
+    return Candidate(
+        id=f"img-{key}",
+        rank=position,
+        provider="openverse",
+        provider_position=position,
+        queries=[query],
+        title=str(item.get("title") or "").strip(),
+        image_url=image_url,
+        thumbnail_url=safe_result_url(item.get("thumbnail")),
+        source_page_url=page_url,
+        source_domain=domain_of(page_url),
+        source_label=str(item.get("provider") or item.get("source") or "").strip(),
+        reported_width=int_or_none(item.get("width")),
+        reported_height=int_or_none(item.get("height")),
+        license_url=str(item.get("license_url") or "").strip() or None,
+        license_tag=str(item.get("license") or "").strip() or None,
+    )
+
+
 def create_session() -> Any:
     try:
         import requests
@@ -332,13 +365,15 @@ def search_serpapi(
         "engine": "google_images",
         "q": query,
         "api_key": api_key,
-        "gl": gl,
-        "hl": hl,
         "ijn": max(page - 1, 0),
         "safe": "active" if safe_search != "off" else "off",
         "device": "desktop",
         "output": "json",
     }
+    if gl:
+        params["gl"] = gl
+    if hl:
+        params["hl"] = hl
     if orientation_value := serpapi_orientation(orientation):
         params["imgar"] = orientation_value
     if image_type_value:
@@ -394,7 +429,7 @@ def search_ddgs(
 
     kwargs: dict[str, Any] = {
         "query": query,
-        "region": region,
+        "region": "wt-wt" if region == "auto" else region,
         "safesearch": {"active": "on", "moderate": "moderate", "off": "off"}[safe_search],
         "max_results": max_results,
         "page": page,
@@ -427,6 +462,72 @@ def search_ddgs(
         requested_backend=backend,
         actual_sources=actual_sources,
     )
+
+
+def search_openverse(
+    session: Any,
+    query: str,
+    max_results: int,
+    page: int,
+    orientation: str,
+    image_type: str,
+    license_filter: str,
+    safe_search: str,
+    size: str,
+    color: str,
+    time_limit: str,
+) -> list[Candidate]:
+    """Search Openverse public media index without an API key.
+
+    Openverse results carry license metadata, but users must still verify rights.
+    Unsupported filters fail explicitly instead of silently being ignored.
+    """
+    if image_type != "any":
+        raise SkillError("Openverse does not support --image-type; use --image-type any")
+    if color != "any" or time_limit != "any":
+        raise SkillError("Openverse does not support --color or --time-limit filters")
+    if size not in {"any", "small", "medium", "large"}:
+        raise SkillError("Openverse supports --size any|small|medium|large")
+    if license_filter in {"share", "commercial-other"}:
+        raise SkillError(f"Openverse does not support --license {license_filter}")
+
+    params: dict[str, Any] = {
+        "q": query,
+        "page": page,
+        "page_size": min(max_results, 100),
+        "mature": "true" if safe_search == "off" else "false",
+    }
+    if orientation != "any":
+        params["aspect_ratio"] = {"wide": "wide", "tall": "tall", "square": "square"}[orientation]
+    if size != "any":
+        params["size"] = size
+    license_types = {
+        "any": None,
+        "creative-commons": "all-cc",
+        "commercial": "commercial",
+        "modify": "modification",
+        "commercial-modify": "commercial,modification",
+    }
+    if value := license_types[license_filter]:
+        params["license_type"] = value
+
+    response = session.get(OPENVERSE_ENDPOINT, params=params, timeout=(10, 35))
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise SkillError(f"Openverse HTTP {response.status_code}: non-JSON response") from exc
+    if response.status_code >= 400:
+        raise SkillError(f"Openverse HTTP {response.status_code}: search unavailable")
+    if not isinstance(payload, dict) or not isinstance(payload.get("results"), list):
+        raise SkillError("Openverse returned unexpected search payload")
+    result: list[Candidate] = []
+    for position, item in enumerate(payload["results"][:max_results], 1):
+        if not isinstance(item, dict):
+            continue
+        candidate = make_openverse_candidate(query, position, item)
+        if candidate:
+            result.append(candidate)
+    return result
 
 
 def score_candidate(candidate: Candidate, preferred_domains: list[str], orientation: str) -> float:
@@ -669,7 +770,7 @@ def download_next_batch(
     attempts = 0
     retryable = {"found"}
     if retry_failed:
-        retryable.add("failed")
+        retryable.update({"failed", "skipped-small", "skipped-metadata-small"})
 
     for candidate in candidates:
         if len(downloaded) >= count or attempts >= max_attempts:
@@ -920,23 +1021,63 @@ def write_cache(cache_path: Path, payload: dict[str, Any], candidates: list[Cand
     atomic_write_json(cache_path, payload)
 
 
+def find_reusable_cache(
+    root: Path,
+    queries: list[str],
+    settings: dict[str, Any],
+    provider: str,
+    hours: int,
+    exclude: Path,
+) -> dict[str, Any] | None:
+    """Reuse search metadata only for identical settings; never reuse old downloaded files."""
+    base = root / ".image-search"
+    if hours < 1 or not base.is_dir():
+        return None
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    matches: list[tuple[datetime, dict[str, Any]]] = []
+    for candidate_path in base.glob("*/results-cache.json"):
+        try:
+            path = resolve_under_root(candidate_path, root, label="reusable cache")
+            if path.parent == exclude:
+                continue
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if (payload.get("schema_version") != 3 or
+                payload.get("tool") != "website-image-finder" or
+                payload.get("requested_provider") != provider or
+                payload.get("queries") != queries or
+                payload.get("search_settings") != settings or
+                not payload.get("results") or not payload.get("providers_used")):
+                continue
+            created = datetime.fromisoformat(payload["created_at"])
+            if created.tzinfo is None or not cutoff <= created <= datetime.now(timezone.utc):
+                continue
+            matches.append((created, payload))
+        except (OSError, ValueError, TypeError, KeyError, SkillError):
+            continue
+    if not matches:
+        return None
+    return max(matches, key=lambda item: item[0])[1]
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("query", help="Primary image-search query")
     parser.add_argument("--extra-query", action="append", default=[], help="Additional query; repeatable")
-    parser.add_argument("--provider", choices=["auto", "serpapi", "ddgs"], default="auto")
-    parser.add_argument("--no-provider-fallback", action="store_true", help="Do not fall back from SerpApi to DDGS")
+    parser.add_argument("--provider", choices=["auto", "serpapi", "ddgs", "openverse"], default="auto")
+    parser.add_argument("--no-provider-fallback", action="store_true", help="Do not fall back between search providers")
     parser.add_argument("--ddgs-backend", choices=["auto", "bing", "duckduckgo"], default="auto")
     parser.add_argument("--root", default=".", help="Project root; output must stay inside it")
     parser.add_argument("--out", default=None, help="Output directory; default is .image-search/<slug>-<UTC timestamp>")
     parser.add_argument("--overwrite-output", action="store_true", help="Allow a non-empty output directory")
     parser.add_argument("--max-results", type=int, default=60, help="Maximum results requested per query per page")
+    parser.add_argument("--reuse-cache-hours", type=int, default=0, help="Reuse matching search results from prior runs up to N hours old (0 disables)")
+    parser.add_argument("--max-serpapi-requests", type=int, default=3, help="Prevent accidental paid search spikes; increase explicitly for multi-page searches")
     parser.add_argument("--pages", type=int, default=1, help="Number of result pages per query (1-3; each SerpApi page may use a search credit)")
     parser.add_argument("--page", type=int, default=1, help="Starting provider page, 1-based")
     parser.add_argument("--batch-size", "--keep", dest="batch_size", type=int, default=12, help="Candidates in the first review batch; 0 means URLs only")
     parser.add_argument("--max-attempts", type=int, default=30, help="Maximum network download attempts for the first batch")
     parser.add_argument("--download", type=int, default=None, help="Deprecated alias for --max-attempts")
-    parser.add_argument("--region", default="lt-lt", help="Region-language, e.g. lt-lt, ua-uk, us-en")
+    parser.add_argument("--region", default="auto", help="auto (worldwide) or region-language, e.g. lt-lt, ua-uk, us-en")
     parser.add_argument("--min-width", type=int, default=800)
     parser.add_argument("--min-height", type=int, default=500)
     parser.add_argument("--max-mb", type=int, default=12)
@@ -968,6 +1109,10 @@ def validate_args(args: argparse.Namespace) -> None:
         raise SkillError("each query must be 300 characters or fewer")
     if any(len(values) > 50 for values in (args.preferred_domain, args.allowed_domain, args.blocked_domain)):
         raise SkillError("each domain filter list is limited to 50 entries")
+    if not 0 <= args.reuse_cache_hours <= 168:
+        raise SkillError("--reuse-cache-hours must be between 0 and 168")
+    if not 1 <= args.max_serpapi_requests <= 15:
+        raise SkillError("--max-serpapi-requests must be between 1 and 15")
     if args.max_results < 1 or args.max_results > 100:
         raise SkillError("--max-results must be between 1 and 100")
     if args.pages < 1 or args.pages > 3 or args.page < 1 or args.page > 20:
@@ -1020,12 +1165,39 @@ def main() -> int:
         requested_provider = args.provider
         primary_provider = requested_provider
         if primary_provider == "auto":
-            primary_provider = "serpapi" if api_key else "ddgs"
+            primary_provider = "openverse" if args.license_filter == "creative-commons" else ("serpapi" if api_key else "ddgs")
         if primary_provider == "serpapi" and not api_key:
             if requested_provider == "serpapi":
                 raise SkillError("SERPAPI_API_KEY or SERPAPI_KEY is required for --provider serpapi")
             primary_provider = "ddgs"
 
+        search_settings = {
+            "region": args.region,
+            "start_page": args.page,
+            "pages": args.pages,
+            "max_results_per_query_page": args.max_results,
+            "orientation": args.orientation,
+            "image_type": args.image_type,
+            "size": args.size,
+            "color": args.color,
+            "safe_search": args.safe_search,
+            "time_limit": args.time_limit,
+            "license_filter": args.license_filter,
+            "preferred_domains": preferred_domains,
+            "allowed_domains": allowed_domains,
+            "blocked_domains": blocked_domains,
+            "ddgs_backend": args.ddgs_backend,
+            "no_provider_fallback": args.no_provider_fallback,
+        }
+        reused_payload = find_reusable_cache(
+            root, queries, search_settings, requested_provider, args.reuse_cache_hours, out_dir
+        )
+        if (reused_payload is None and primary_provider == "serpapi" and
+            len(queries) * args.pages > args.max_serpapi_requests):
+            raise SkillError(
+                f"Up to {len(queries) * args.pages} SerpApi requests requested; "
+                f"use --max-serpapi-requests to permit this cost"
+            )
         session = create_session()
         all_candidates: list[Candidate] = []
         warnings_list: list[str] = []
@@ -1040,40 +1212,69 @@ def main() -> int:
             merge_unique(ddgs_actual_sources, batch.actual_sources)
             return batch.candidates
 
-        for query in queries:
-            query_results: list[Candidate] = []
-            provider_for_query = primary_provider
-            for page in range(args.page, args.page + args.pages):
-                try:
-                    if provider_for_query == "serpapi":
-                        found = search_serpapi(session, query, api_key, args.max_results, args.region, page, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit)
-                    else:
-                        found = record_ddgs_batch(search_ddgs(query, args.max_results, args.region, page, args.ddgs_backend, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit))
-                    if provider_for_query not in providers_used:
-                        providers_used.append(provider_for_query)
-                    if provider_for_query == "serpapi" and not found and not args.no_provider_fallback and requested_provider == "auto":
-                        fallback_found = record_ddgs_batch(search_ddgs(query, args.max_results, args.region, page, args.ddgs_backend, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit))
-                        if "ddgs" not in providers_used:
-                            providers_used.append("ddgs")
-                        query_results.extend(fallback_found)
-                        warnings_list.append(f"{query} page {page}: SerpApi returned no images; used DDGS fallback")
-                    else:
-                        query_results.extend(found)
-                except Exception as exc:
-                    warnings_list.append(redact(f"{query} page {page} via {provider_for_query}: {type(exc).__name__}: {exc}", secrets))
-                    if provider_for_query == "serpapi" and not args.no_provider_fallback and requested_provider == "auto":
-                        provider_for_query = "ddgs"
+        if reused_payload is not None:
+            for saved in reused_payload["results"]:
+                if not isinstance(saved, dict):
+                    continue
+                item = candidate_from_dict(saved)
+                item.status = "found"
+                item.local_file = None
+                item.downloaded_url = None
+                item.sha256 = None
+                item.dhash = None
+                item.batch = None
+                item.error = None
+                all_candidates.append(item)
+            providers_used = list(reused_payload.get("providers_used", []))
+            ddgs_version_value = reused_payload.get("ddgs_version")
+            ddgs_actual_sources = list(reused_payload.get("actual_sources") or [])
+            warnings_list.append("Reused matching cached provider results; no new search requests")
+        else:
+            provider_chain = [primary_provider]
+            if requested_provider == "auto" and not args.no_provider_fallback:
+                if primary_provider == "serpapi":
+                    provider_chain.extend(["ddgs", "openverse"])
+                elif primary_provider == "ddgs":
+                    provider_chain.append("openverse")
+
+            for query in queries:
+                query_results: list[Candidate] = []
+                for page in range(args.page, args.page + args.pages):
+                    for provider in provider_chain:
                         try:
-                            found = record_ddgs_batch(search_ddgs(query, args.max_results, args.region, page, args.ddgs_backend, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit))
-                            if "ddgs" not in providers_used:
-                                providers_used.append("ddgs")
-                            query_results.extend(found)
-                            warnings_list.append(f"{query} page {page}: fell back from SerpApi to DDGS")
-                        except Exception as fallback_exc:
-                            warnings_list.append(redact(f"{query} page {page} DDGS fallback: {type(fallback_exc).__name__}: {fallback_exc}", secrets))
-            for candidate in query_results:
-                candidate.score = score_candidate(candidate, preferred_domains, args.orientation)
-            all_candidates.extend(query_results)
+                            if provider == "serpapi":
+                                found = search_serpapi(
+                                    session, query, api_key, args.max_results, args.region, page,
+                                    args.orientation, args.image_type, args.license_filter,
+                                    args.safe_search, args.size, args.color, args.time_limit,
+                                )
+                            elif provider == "ddgs":
+                                found = record_ddgs_batch(search_ddgs(
+                                    query, args.max_results, args.region, page, args.ddgs_backend,
+                                    args.orientation, args.image_type, args.license_filter,
+                                    args.safe_search, args.size, args.color, args.time_limit,
+                                ))
+                            else:
+                                found = search_openverse(
+                                    session, query, args.max_results, page, args.orientation,
+                                    args.image_type, args.license_filter, args.safe_search,
+                                    args.size, args.color, args.time_limit,
+                                )
+                            if provider not in providers_used:
+                                providers_used.append(provider)
+                            if found:
+                                query_results.extend(found)
+                                break
+                            warnings_list.append(f"{query} page {page}: {provider} returned no images")
+                        except Exception as exc:
+                            warnings_list.append(redact(
+                                f"{query} page {page} via {provider}: {type(exc).__name__}: {exc}",
+                                secrets,
+                            ))
+                    # Exhaustion is permitted; do not claim a usable download.
+                for candidate in query_results:
+                    candidate.score = score_candidate(candidate, preferred_domains, args.orientation)
+                all_candidates.extend(query_results)
 
         candidates = merge_candidates(all_candidates)
         if allowed_domains:
@@ -1103,23 +1304,7 @@ def main() -> int:
             "requested_backend": args.ddgs_backend,
             "actual_sources": ddgs_actual_sources,
             "queries": queries,
-            "search_settings": {
-                "region": args.region,
-                "start_page": args.page,
-                "pages": args.pages,
-                "max_results_per_query_page": args.max_results,
-                "orientation": args.orientation,
-                "image_type": args.image_type,
-                "size": args.size,
-                "color": args.color,
-                "safe_search": args.safe_search,
-                "time_limit": args.time_limit,
-                "license_filter": args.license_filter,
-                "preferred_domains": preferred_domains,
-                "allowed_domains": allowed_domains,
-                "blocked_domains": blocked_domains,
-                "ddgs_backend": args.ddgs_backend,
-            },
+            "search_settings": search_settings,
             "download_settings": download_settings,
             "warnings": warnings_list,
             "rights_notice": "Search filters and metadata are not legal proof of reuse rights. Verify the source page and license before publishing.",
@@ -1170,7 +1355,12 @@ def main() -> int:
             print("Warnings:", file=sys.stderr)
             for message in warnings_list:
                 print(f"- {message}", file=sys.stderr)
-        return 0 if candidates else 1
+        if not candidates:
+            return 1
+        if args.batch_size > 0 and not batch_candidates:
+            print("Error: search returned URLs but no usable image was downloaded; check candidate failures in the cache.", file=sys.stderr)
+            return 3
+        return 0
     except SkillError as exc:
         print(f"Error: {redact(str(exc))}", file=sys.stderr)
         return 2
