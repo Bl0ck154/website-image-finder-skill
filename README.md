@@ -140,6 +140,25 @@ python3 <SKILL_DIR>/scripts/skill.py evaluate --root . --latest 10
 
 It summarizes provider invocations, observed first-batch duration, successful downloads and failures. Historical runs without metrics are marked incomplete. Evaluation output omits original source URLs. This does not measure time saved by the AI agent or subjective image relevance. For practical examples and a fair comparison with normal agent search, see [Usage examples](docs/EXAMPLES.md) and [Evaluation guide](docs/EVALUATION.md).
 
+## Checking live providers
+
+Use a bounded, explicit diagnostic to test one or more free sources. It
+runs a real search, downloads one candidate and verifies its WebP export in
+a temporary project, then removes the image files.
+
+~~~sh
+python3 scripts/skill.py setup
+python3 scripts/provider_smoke.py --live --provider wikimedia --query "mountain lake"
+# Optional: append --provider openverse and --provider ddgs
+~~~
+
+The report includes observed downloads, attempts, timings and failure reasons,
+without copying third-party image URLs into its JSON. Paid SerpApi is excluded.
+This command is intentionally separate from offline CI: provider outages and
+rate limits are not deterministic product failures. See
+[Architecture](docs/ARCHITECTURE.md) and
+[Live smoke observations](docs/LIVE_SMOKE_TEST.md).
+
 ## Why use it instead of an agent's ordinary image search?
 
 A coding agent with web search can already find image URLs. This skill provides a repeatable workflow for downloading candidates, rejecting broken or duplicate files, inspecting a contact sheet, resuming results without a new provider search, exporting optimized website assets and keeping source metadata in the project. The new shortlist helps prioritize manual review. **You still need the agent or a person to judge visual fit and verify reuse rights.**

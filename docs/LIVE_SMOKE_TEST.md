@@ -47,3 +47,22 @@ A fresh temporary project used the public Openverse API with a landscape query, 
 - The evaluator summarized both runs: 2 runs with successful downloads, 2 downloaded candidates, 1 Openverse invocation total, 1 cache reuse. The observed median initial search/first-batch duration was 1.538 seconds on that host at that time.
 
 The temporary checkout and images were removed. The report does not establish time saved over a normal AI agent, independent user adoption, or legal reuse rights.
+
+## v0.5.2: opt-in provider diagnostic (2026-11-03)
+
+The new `scripts/provider_smoke.py` tool requires `--live` and reports
+search, downloads, WebP finalization and timeouts. It never calls SerpApi or
+persists downloaded image files.
+
+In one check on a development server using the query "mountain lake":
+
+| Provider | Result | Duration | Note |
+| --- | --- | ---: | --- |
+| Wikimedia Commons | 6 results; one download and finalization succeeded | 7.75 s | Successful end-to-end run |
+| Openverse | Timed out with no results established | 35.02 s | No availability or quality conclusion |
+| DDGS | Optional dependency missing in active Python | 0.32 s | Setup required; not a provider failure |
+
+These are single observations, not average latencies or a provider ranking.
+Run `python3 scripts/skill.py setup` before the smoke command when optional
+DDGS dependencies are not installed. The provider can also be unavailable,
+rate-limited or refuse image downloads.

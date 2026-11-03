@@ -5,6 +5,10 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 3
+    ignore:
+      # Pillow 13 requires Python 3.11+, while this skill supports Python 3.10.
+      - dependency-name: Pillow
+        versions: [">=13.0.0"]
   - package-ecosystem: github-actions
     directory: /
     schedule:

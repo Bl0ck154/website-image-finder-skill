@@ -52,6 +52,8 @@ The first run may install the pinned-compatible packages in `requirements.txt` w
 
 If a search finds image URLs but cannot download a usable image, the CLI returns code 3. Inspect the cache `warnings` and per-candidate `error` fields before retrying. The `more --retry-failed` command retries failed/small candidates; use `--min-width` and `--min-height` overrides when appropriate. Do not call it a successful image insertion until the local file was verified.
 
+For manual diagnostics, run `python3 <SKILL_DIR>/scripts/provider_smoke.py --live --provider wikimedia` after `skill.py setup`. This is a bounded live check, not a benchmark or a routine agent step.\n\nFor manual diagnostics, run `python3 <SKILL_DIR>/scripts/provider_smoke.py --live --provider wikimedia` after `skill.py setup`. This is a bounded live check, not a benchmark or a routine agent step.
+
 If Python, pip, or network access is unavailable, a compatible agent may use its **native web/image search** tools to provide candidate source URLs, if those tools exist. This is a limited fallback: do not pretend to have downloaded, optimized, or verified an image, or produced a contact sheet. Explain the limitation and do not install other tools without permission.
 
 ## Security, rights and privacy
