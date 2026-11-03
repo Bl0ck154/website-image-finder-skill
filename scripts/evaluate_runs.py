@@ -97,13 +97,14 @@ def load_runs(root: Path, run_paths: list[str], latest: int) -> list[dict[str, A
             reverse=True,
         )[:latest]
     out = []
-    for path in paths:
+    for number, path in enumerate(paths, 1):
         safe_path = ensure_within_root(path, private, label="search cache")
         try:
             payload = json.loads(safe_path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             raise SkillError(f"Cannot read cache for {safe_path.parent.name}") from exc
-        out.append(summarize_cache(payload, safe_path.parent.name))
+        # Run-directory names often contain the search query. Never copy that name to the shareable summary.
+        out.append(summarize_cache(payload, f"run-{number:02d}"))
     if not out:
         raise SkillError("No saved search runs available")
     return out

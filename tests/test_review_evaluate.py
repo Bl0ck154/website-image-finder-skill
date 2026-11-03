@@ -163,6 +163,7 @@ class RunEvaluationTests(unittest.TestCase):
             self.assertEqual(report["runs_with_download"], 1)
             self.assertEqual(report["median_elapsed_seconds"], 1.25)
             self.assertNotIn("secret=value", json.dumps(runs))
+            self.assertEqual(runs[0]["run"], "run-01")
 
     def test_run_outside_private_directory_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:

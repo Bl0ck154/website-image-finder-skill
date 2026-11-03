@@ -26,7 +26,7 @@ python3 <SKILL_DIR>/scripts/skill.py evaluate --root . \
 
 The report includes runs with a usable download, the number of search-provider function invocations, median first-search duration, candidate failures and duplicates, and cache reuse. Search-provider invocation counts exclude individual image downloads and HTTP library retries. Measured elapsed time covers initial search and first-batch work, excluding subsequent review and extra batches.
 
-Older caches do not contain all metrics, so those fields are marked missing rather than estimated. Sensitive image URLs are omitted from the evaluation output, which should remain under .image-search/.
+Older caches do not contain all metrics, so those fields are marked missing rather than estimated. Sensitive image URLs and original query-bearing run-directory names are omitted from the evaluation output, which should remain under .image-search/.
 
 ## Measuring actual interest
 
