@@ -1,6 +1,7 @@
 # Website Image Finder — Agent Skill
 
 [![skills.sh](https://skills.sh/b/Bl0ck154/website-image-finder-skill)](https://skills.sh/Bl0ck154/website-image-finder-skill)
+[![Tests](https://github.com/Bl0ck154/website-image-finder-skill/actions/workflows/tests.yml/badge.svg)](https://github.com/Bl0ck154/website-image-finder-skill/actions/workflows/tests.yml)
 
 Find **real web images for websites with AI coding agents**. Search, compare candidate previews, remove duplicates, optimize website assets, and keep the original source information private.
 
@@ -152,6 +153,8 @@ python scripts/skill.py finalize --root . --cache .image-search/<run>/results-ca
 ```
 
 The agent should inspect the contact sheet, choose a relevant candidate, verify the original source's reuse conditions and integrate the resulting local image with useful alt text. It must not infer permission to publish from the search engine's metadata alone.
+
+For a reproducible end-to-end test using live Openverse results, see [Live smoke test](docs/LIVE_SMOKE_TEST.md). It demonstrates search, download, asset finalization and private provenance without redistributing the example image.
 
 ## Compatibility and troubleshooting
 

@@ -33,8 +33,17 @@ def check() -> int:
     print(f"{'OK' if has_key else 'INFO'}: SerpApi key {'is configured' if has_key else 'is not configured'}")
     if importlib.util.find_spec("ddgs") is None and not has_key:
         print("INFO: DDGS unavailable; Openverse can still search without an API key")
+    if "Pillow" not in missing_required:
+        try:
+            from PIL import features
+            if not features.check("webp"):
+                missing_required.append("Pillow WebP codec")
+                print("MISSING: Pillow has no WebP support")
+        except (ImportError, OSError) as exc:
+            missing_required.append("Pillow WebP support")
+            print(f"MISSING: cannot check Pillow WebP support ({exc})")
     if missing_required:
-        print("Install missing packages with install.ps1 or pip --user.", file=sys.stderr)
+        print("Install missing requirements using the active Python environment.", file=sys.stderr)
         return 2
     return 0
 
