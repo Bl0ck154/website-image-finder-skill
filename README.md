@@ -11,7 +11,7 @@ Works with compatible Agent Skills clients (including Claude Code, Codex, Cursor
 
 ## Highlights
 
-- Provider-side filters for layout, size, type, color, time, license, and domains
+- Provider filters for layout, size, type, color, time and license; domain allow/block lists are applied locally after search
 - Google Images through SerpApi
 - DDGS / DuckDuckGo Images with Openverse as a fallback, without an API key
 - Openverse for license-oriented image discovery (not automatic legal clearance)
