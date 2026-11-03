@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.1 (2026-11-03)
+
+- Add image-purpose presets for hero photos, standard photos, logos, icons and illustrations; explicit size overrides remain available.
+- Recover from unsuccessful image downloads by trying another free provider within the same attempt budget when automatic fallback is permitted.
+- Maintain strict provider choice for license-sensitive searches and keep SerpApi paid access opt-in.
+- Pin outgoing HTTP connections to prevalidated public IPs while retaining HTTPS certificate verification; disallow proxies that bypass DNS pinning.
+- Preserve original downloaded raster bytes privately, avoiding a second lossy WebP encoding when finalizing.
+- Restrict search runs and cached-source selection to the private `.image-search/` directory.
+- Expand regression tests for Windows/macOS/Linux and live-test Wikimedia search, downloads, review, finalization and evaluation.
+
 ## 0.5.0
 
 - Create a private technical shortlist after each downloaded batch. Scores use measured image dimensions, aspect ratio, search-title overlap and source metadata, with per-factor explanations.

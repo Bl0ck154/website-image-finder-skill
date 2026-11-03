@@ -21,7 +21,8 @@ Works with compatible Agent Skills clients, including Claude Code, Codex and Cur
 - Dense justified `contact-sheet-XX.jpg` previews
 - Next-batch downloads without another search-provider call
 - Actual file validation, minimum dimensions, size limits, and duplicate filtering
-- WebP/PNG/JPEG finalization with **private**, gitignored source metadata
+- DNS-pinned downloads that reject non-public network addresses and keep HTTPS certificate checks
+- WebP/PNG/JPEG finalization from original image bytes when available, with **private**, gitignored source metadata
 - Explicit SerpApi request budget, bounded provider retries, and sensible exit codes
 - Private run evaluation for measuring search/download reliability without sharing image URLs
 - Python 3.10+; prepares isolated dependencies automatically on first use
@@ -51,6 +52,12 @@ python3 <SKILL_DIR>/scripts/skill.py search "sunlit modern living room" --root .
 On Windows use `py -3` instead of `python3`. You can use `python3 <SKILL_DIR>/scripts/skill.py check` to inspect setup and `setup` to prepare it. On Linux and macOS, a user-wide package install is unnecessary.
 
 **If Python is unavailable or the agent cannot install packages:** the skill instructions allow a limited fallback through the agent's own web/image search tools, if provided. That fallback cannot promise contact sheets, local optimization, or metadata files.
+
+## Asset presets
+
+Use `--asset-type hero|photo|logo|icon|illustration` to choose more appropriate minimum dimensions. The existing photo defaults remain 800×500; logo permits 100×60 and icon 64×64. Explicit `--min-width`, `--min-height` and `--orientation` override the preset.
+
+When automatic free search returns image URLs but none can be downloaded, the skill tries another available free provider using its remaining download-attempt budget. License-filtered searches never silently weaken usage-rights constraints and SerpApi remains explicitly opt-in.
 
 ## How free image search works
 
@@ -95,7 +102,8 @@ The first successful downloaded batch creates:
 ├── candidates-01.json
 ├── contact-sheet-01.jpg
 ├── review-batch-01.json
-└── downloaded candidate files
+├── originals/  # private original raster bytes for one-pass final export
+└── downloaded WebP preview candidates
 ```
 
 If the first batch is unsuitable:
@@ -104,7 +112,7 @@ If the first batch is unsuitable:
 py -3 <SKILL_DIR>\scripts\skill.py more --root . --run .image-search\<run> --count 12
 ```
 
-This uses the existing cache and creates the next batch without calling any search provider again.
+This uses the existing cache and creates the next batch without calling any search provider again. On newer runs, finalization prefers a private original raster to avoid recompressing a WebP review preview.
 
 Matching results are reused for 24 hours by default (same queries, filters and provider policy). This reuses search **metadata**, not old downloaded images. Use `--reuse-cache-hours 0` for a fresh search. The default region is `auto` instead of a country-specific locale.
 

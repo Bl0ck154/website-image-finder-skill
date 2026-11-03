@@ -22,12 +22,15 @@ from typing import Any, Iterable
 
 from review_candidates import save_review_report
 
+from safe_transport import mount_pinned_transport
+
 from common import (
     VERSION,
     SkillError,
     atomic_write_json,
     canonical_url,
     domain_of,
+    ensure_within_root,
     host_matches,
     normalize_domain,
     origin_referer,
@@ -40,12 +43,19 @@ from common import (
     prepare_private_workdir,
 )
 
-USER_AGENT = "WebsiteImageFinder/0.5.0 (https://github.com/Bl0ck154/website-image-finder-skill)"
+USER_AGENT = "WebsiteImageFinder/0.5.1 (https://github.com/Bl0ck154/website-image-finder-skill)"
 SERPAPI_ENDPOINT = "https://serpapi.com/search.json"
 OPENVERSE_ENDPOINT = "https://api.openverse.org/v1/images/"
 WIKIMEDIA_ENDPOINT = "https://commons.wikimedia.org/w/api.php"
 MAX_REDIRECTS = 5
 CACHE_FILENAME = "results-cache.json"
+ASSET_PRESETS = {
+    "photo": (800, 500, "any"),
+    "hero": (1200, 600, "wide"),
+    "logo": (100, 60, "any"),
+    "icon": (64, 64, "square"),
+    "illustration": (400, 300, "any"),
+}
 DDGS_SOURCE_NAMES = {"bing": "Bing", "duckduckgo": "DuckDuckGo"}
 
 
@@ -69,6 +79,7 @@ class Candidate:
     is_product: bool | None = None
     score: float = 0.0
     local_file: str | None = None
+    original_file: str | None = None
     downloaded_url: str | None = None
     content_type: str | None = None
     source_bytes: int | None = None
@@ -327,28 +338,12 @@ def make_openverse_candidate(query: str, position: int, item: dict[str, Any]) ->
 def create_session() -> Any:
     try:
         import requests
-        from requests.adapters import HTTPAdapter
-        from urllib3.util.retry import Retry
     except ImportError as exc:
         raise SkillError("Missing requests. Install it with: py -3 -m pip install --user requests") from exc
-    # Retry transient server outages, but never retry HTTP 429 automatically:
-    # free search APIs should be allowed to enforce their rate limits.
-    retry = Retry(
-        total=2,
-        connect=1,
-        read=0,
-        status=2,
-        backoff_factor=0.6,
-        status_forcelist=(500, 502, 503, 504),
-        allowed_methods=frozenset({"GET"}),
-        respect_retry_after_header=False,
-        raise_on_status=False,
-    )
     session = requests.Session()
     session.trust_env = os.environ.get("WEBSITE_IMAGE_FINDER_TRUST_ENV", "").strip() == "1"
     session.headers.update({"User-Agent": USER_AGENT})
-    session.mount("https://", HTTPAdapter(max_retries=retry))
-    session.mount("http://", HTTPAdapter(max_retries=retry))
+    mount_pinned_transport(session)
     return session
 
 
@@ -818,6 +813,26 @@ def download_candidate(
                     except FileNotFoundError:
                         pass
 
+                # Preserve the exact downloaded bytes for a one-pass final
+                # conversion. The WebP above is only a review/contact-sheet
+                # preview. Do not preserve animated originals when only the
+                # permitted first frame was used for preview.
+                if not getattr(opened, "is_animated", False):
+                    originals = out_dir / "originals"
+                    originals.mkdir(exist_ok=True)
+                    original_name = f"{digest}.original"
+                    fd, temp_source = tempfile.mkstemp(prefix=".original-", dir=originals)
+                    try:
+                        with os.fdopen(fd, "wb") as handle:
+                            handle.write(source_data)
+                        os.replace(temp_source, originals / original_name)
+                    finally:
+                        try:
+                            os.unlink(temp_source)
+                        except FileNotFoundError:
+                            pass
+                    candidate.original_file = f"originals/{original_name}"
+
         seen_sha.add(digest)
         seen_hashes.append(candidate.dhash or "")
         candidate.local_file = filename
@@ -1176,11 +1191,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-attempts", type=int, default=30, help="Maximum network download attempts for the first batch")
     parser.add_argument("--download", type=int, default=None, help="Deprecated alias for --max-attempts")
     parser.add_argument("--region", default="auto", help="auto (worldwide) or region-language, e.g. lt-lt, ua-uk, us-en")
-    parser.add_argument("--min-width", type=int, default=800)
-    parser.add_argument("--min-height", type=int, default=500)
+    parser.add_argument("--asset-type", choices=sorted(ASSET_PRESETS), default="photo",
+                        help="Built-in image size/aspect defaults; --min-width/--min-height override them")
+    parser.add_argument("--min-width", type=int, default=None)
+    parser.add_argument("--min-height", type=int, default=None)
     parser.add_argument("--max-mb", type=int, default=12)
     parser.add_argument("--max-pixels", type=int, default=30_000_000)
-    parser.add_argument("--orientation", choices=["any", "square", "tall", "wide"], default="any")
+    parser.add_argument("--orientation", choices=["any", "square", "tall", "wide"], default=None)
     parser.add_argument("--image-type", choices=["any", "photo", "clipart", "lineart", "transparent", "animated"], default="any")
     parser.add_argument("--size", choices=["any", "small", "medium", "large", "wallpaper"], default="any")
     parser.add_argument("--color", default="any", help="any, bw, red, orange, yellow, green, teal, blue, purple, pink, white, gray, black, brown")
@@ -1198,6 +1215,14 @@ def parse_args() -> argparse.Namespace:
 def validate_args(args: argparse.Namespace) -> None:
     if args.download is not None:
         args.max_attempts = args.download
+    # Preserve callers' explicit size/shape overrides.
+    width, height, shape = ASSET_PRESETS[args.asset_type]
+    if args.min_width is None:
+        args.min_width = width
+    if args.min_height is None:
+        args.min_height = height
+    if args.orientation is None:
+        args.orientation = shape
     if not args.query.strip():
         raise SkillError("query cannot be empty")
     all_queries = [args.query, *args.extra_query]
@@ -1244,7 +1269,16 @@ def main() -> int:
         prepare_private_workdir(root)
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         default_out = Path(".image-search") / f"{slugify(args.query)}-{timestamp}"
-        out_dir = resolve_under_root(args.out if args.out else default_out, root, label="output directory")
+        # Cache metadata can contain signed URLs and third-party titles, so
+        # never let --out place private search files under public website paths.
+        private_root = resolve_under_root(".image-search", root)
+        out_dir = ensure_within_root(
+            resolve_under_root(args.out if args.out else default_out, root, label="output directory"),
+            private_root,
+            label="private search output",
+        )
+        if out_dir == private_root:
+            raise SkillError("--out must be a subdirectory of .image-search, not .image-search itself")
         if out_dir.exists() and any(out_dir.iterdir()) and not args.overwrite_output:
             raise SkillError(f"output directory is not empty: {out_dir}; choose another path or use --overwrite-output")
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -1270,6 +1304,7 @@ def main() -> int:
 
         search_settings = {
             "region": args.region,
+            "asset_type": args.asset_type,
             "start_page": args.page,
             "pages": args.pages,
             "max_results_per_query_page": args.max_results,
@@ -1285,7 +1320,7 @@ def main() -> int:
             "blocked_domains": blocked_domains,
             "ddgs_backend": args.ddgs_backend,
             "no_provider_fallback": args.no_provider_fallback,
-            "provider_policy": "free-first-v1",
+            "provider_policy": "free-first-v2",
         }
         reused_payload = find_reusable_cache(
             root, queries, search_settings, requested_provider, args.reuse_cache_hours, out_dir
@@ -1311,6 +1346,54 @@ def main() -> int:
             merge_unique(ddgs_actual_sources, batch.actual_sources)
             return batch.candidates
 
+        attempted_provider_keys: set[tuple[str, int, str]] = set()
+
+        def fetch_from_provider(query: str, page: int, provider: str) -> list[Candidate]:
+            """Run and account for one provider, preserving free-only policy."""
+            attempted_provider_keys.add((query, page, provider))
+            provider_calls[provider] = provider_calls.get(provider, 0) + 1
+            try:
+                if provider == "serpapi":
+                    found = search_serpapi(
+                        session, query, api_key, args.max_results, args.region, page,
+                        args.orientation, args.image_type, args.license_filter,
+                        args.safe_search, args.size, args.color, args.time_limit,
+                    )
+                elif provider == "ddgs":
+                    found = record_ddgs_batch(search_ddgs(
+                        query, args.max_results, args.region, page, args.ddgs_backend,
+                        args.orientation, args.image_type, args.license_filter,
+                        args.safe_search, args.size, args.color, args.time_limit,
+                    ))
+                elif provider == "openverse":
+                    found = search_openverse(
+                        session, query, args.max_results, page, args.orientation,
+                        args.image_type, args.license_filter, args.safe_search,
+                        args.size, args.color, args.time_limit,
+                    )
+                else:
+                    found = search_wikimedia(
+                        session, query, args.max_results, page, args.orientation,
+                        args.image_type, args.license_filter, args.safe_search,
+                        args.size, args.color, args.time_limit,
+                    )
+                if provider not in providers_used:
+                    providers_used.append(provider)
+                if found and provider == "wikimedia":
+                    warnings_list.append(
+                        "Wikimedia Commons does not provide provider-side safe search; "
+                        "review every candidate and verify image licenses."
+                    )
+                if not found:
+                    warnings_list.append(f"{query} page {page}: {provider} returned no images")
+                return found
+            except Exception as exc:
+                warnings_list.append(redact(
+                    f"{query} page {page} via {provider}: {type(exc).__name__}: {exc}",
+                    secrets,
+                ))
+                return []
+
         if reused_payload is not None:
             for saved in reused_payload["results"]:
                 if not isinstance(saved, dict):
@@ -1318,6 +1401,7 @@ def main() -> int:
                 item = candidate_from_dict(saved)
                 item.status = "found"
                 item.local_file = None
+                item.original_file = None
                 item.downloaded_url = None
                 item.sha256 = None
                 item.dhash = None
@@ -1327,55 +1411,20 @@ def main() -> int:
             providers_used = list(reused_payload.get("providers_used", []))
             ddgs_version_value = reused_payload.get("ddgs_version")
             ddgs_actual_sources = list(reused_payload.get("actual_sources") or [])
+            for query in queries:
+                for page in range(args.page, args.page + args.pages):
+                    for provider in providers_used:
+                        attempted_provider_keys.add((query, page, provider))
             warnings_list.append("Reused matching cached provider results; no new search requests")
         else:
             for query in queries:
                 query_results: list[Candidate] = []
                 for page in range(args.page, args.page + args.pages):
                     for provider in provider_chain:
-                        provider_calls[provider] = provider_calls.get(provider, 0) + 1
-                        try:
-                            if provider == "serpapi":
-                                found = search_serpapi(
-                                    session, query, api_key, args.max_results, args.region, page,
-                                    args.orientation, args.image_type, args.license_filter,
-                                    args.safe_search, args.size, args.color, args.time_limit,
-                                )
-                            elif provider == "ddgs":
-                                found = record_ddgs_batch(search_ddgs(
-                                    query, args.max_results, args.region, page, args.ddgs_backend,
-                                    args.orientation, args.image_type, args.license_filter,
-                                    args.safe_search, args.size, args.color, args.time_limit,
-                                ))
-                            elif provider == "openverse":
-                                found = search_openverse(
-                                    session, query, args.max_results, page, args.orientation,
-                                    args.image_type, args.license_filter, args.safe_search,
-                                    args.size, args.color, args.time_limit,
-                                )
-                            else:
-                                found = search_wikimedia(
-                                    session, query, args.max_results, page, args.orientation,
-                                    args.image_type, args.license_filter, args.safe_search,
-                                    args.size, args.color, args.time_limit,
-                                )
-                            if provider not in providers_used:
-                                providers_used.append(provider)
-                            if found:
-                                if provider == "wikimedia":
-                                    warnings_list.append(
-                                        "Wikimedia Commons does not provide provider-side safe search; "
-                                        "review every candidate and verify image licenses."
-                                    )
-                                query_results.extend(found)
-                                break
-                            warnings_list.append(f"{query} page {page}: {provider} returned no images")
-                        except Exception as exc:
-                            warnings_list.append(redact(
-                                f"{query} page {page} via {provider}: {type(exc).__name__}: {exc}",
-                                secrets,
-                            ))
-                    # Exhaustion is permitted; do not claim a usable download.
+                        found = fetch_from_provider(query, page, provider)
+                        if found:
+                            query_results.extend(found)
+                            break
                 for candidate in query_results:
                     candidate.score = score_candidate(candidate, preferred_domains, args.orientation)
                 all_candidates.extend(query_results)
@@ -1436,9 +1485,89 @@ def main() -> int:
         urls_file = None
         review_file = None
         if args.batch_size > 0 and candidates:
-            batch_candidates, attempts = download_next_batch(session, candidates, out_dir, download_settings, args.batch_size, args.max_attempts)
+            # Reserve some download attempts for the next free provider if every
+            # URL from the first provider fails. The total --max-attempts cap
+            # still applies across all providers combined.
+            reserve_fallback = (
+                requested_provider == "auto" and len(provider_chain) > 1
+                and not args.no_provider_fallback and args.max_attempts > 1
+            )
+            first_budget = (
+                max(1, min(args.max_attempts - 1, args.max_attempts * 2 // 3))
+                if reserve_fallback else args.max_attempts
+            )
+            batch_candidates, attempts = download_next_batch(
+                session, candidates, out_dir, download_settings,
+                args.batch_size, first_budget,
+            )
+            remaining_budget = args.max_attempts - attempts
+
+            if reserve_fallback and not batch_candidates and remaining_budget > 0:
+                # A provider may return many valid-looking URLs that all fail
+                # due to hotlink protection or stale images. Continue through
+                # free, as-yet-untried providers only in that situation.
+                known_urls = {canonical_url(item.image_url) for item in candidates}
+                for query in queries:
+                    if batch_candidates or remaining_budget <= 0:
+                        break
+                    for page in range(args.page, args.page + args.pages):
+                        if batch_candidates or remaining_budget <= 0:
+                            break
+                        for provider in provider_chain:
+                            if (query, page, provider) in attempted_provider_keys:
+                                continue
+                            found = fetch_from_provider(query, page, provider)
+                            fresh: list[Candidate] = []
+                            for item in found:
+                                address = canonical_url(item.image_url)
+                                if address in known_urls:
+                                    continue
+                                if allowed_domains and not (
+                                    host_matches(item.source_page_url, allowed_domains)
+                                    or host_matches(item.image_url, allowed_domains)
+                                ):
+                                    continue
+                                if blocked_domains and (
+                                    host_matches(item.source_page_url, blocked_domains)
+                                    or host_matches(item.image_url, blocked_domains)
+                                ):
+                                    continue
+                                known_urls.add(address)
+                                item.score = score_candidate(item, preferred_domains, args.orientation)
+                                fresh.append(item)
+                            if not fresh:
+                                continue
+                            candidates.extend(fresh)
+                            candidates.sort(key=lambda item: (-item.score, item.provider_position, item.id))
+                            for rank, candidate in enumerate(candidates, 1):
+                                candidate.rank = rank
+                            added, used = download_next_batch(
+                                session, candidates, out_dir, download_settings,
+                                args.batch_size, remaining_budget,
+                            )
+                            attempts += used
+                            remaining_budget -= used
+                            if added:
+                                batch_candidates.extend(added)
+                                warnings_list.append(
+                                    f"Recovered downloads from fallback provider {provider} "
+                                    "after initial image URLs could not be downloaded"
+                                )
+                                break
+            elif batch_candidates and len(batch_candidates) < args.batch_size and remaining_budget > 0:
+                # Continue the original candidates when the first attempt budget
+                # was reserved but some images actually worked.
+                added, used = download_next_batch(
+                    session, candidates, out_dir, download_settings,
+                    args.batch_size - len(batch_candidates), remaining_budget,
+                )
+                attempts += used
+                batch_candidates.extend(added)
+
             if batch_candidates:
-                batch_number = batch_candidates[0].batch or 1
+                batch_number = 1  # This is the first visible batch in this run.
+                for item in batch_candidates:
+                    item.batch = batch_number
                 sheet, batch_file = write_batch_outputs(batch_candidates, out_dir, batch_number)
                 review_file = save_review_report(batch_candidates, out_dir, args.orientation, batch_number)
         else:
