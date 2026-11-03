@@ -1248,7 +1248,7 @@ def main() -> int:
                                 providers_used.append("ddgs")
                             query_results.extend(fallback_found)
                             warnings_list.append(f"{query} page {page}: SerpApi returned no images; used DDGS fallback")
-                        elif provider_for_query == "ddgs" and not found and requested_provider == "auto":
+                        elif provider_for_query == "ddgs" and not found and not args.no_provider_fallback and requested_provider == "auto":
                             fallback_found = search_openverse(session, query, args.max_results, page, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit)
                             if "openverse" not in providers_used:
                                 providers_used.append("openverse")
@@ -1268,7 +1268,7 @@ def main() -> int:
                                 warnings_list.append(f"{query} page {page}: fell back from SerpApi to DDGS")
                             except Exception as fallback_exc:
                                 warnings_list.append(redact(f"{query} page {page} DDGS fallback: {type(fallback_exc).__name__}: {fallback_exc}", secrets))
-                        elif provider_for_query == "ddgs" and requested_provider == "auto":
+                        elif provider_for_query == "ddgs" and not args.no_provider_fallback and requested_provider == "auto":
                             try:
                                 found = search_openverse(session, query, args.max_results, page, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit)
                                 if "openverse" not in providers_used:
