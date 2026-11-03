@@ -10,6 +10,7 @@ import math
 import os
 import re
 import sys
+import time
 import tempfile
 import warnings
 from dataclasses import asdict, dataclass, field, fields
@@ -18,6 +19,8 @@ from importlib.metadata import PackageNotFoundError, version as package_version
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Iterable
+
+from review_candidates import save_review_report
 
 from common import (
     VERSION,
@@ -37,7 +40,7 @@ from common import (
     prepare_private_workdir,
 )
 
-USER_AGENT = "WebsiteImageFinder/0.4.0 (https://github.com/Bl0ck154/website-image-finder-skill)"
+USER_AGENT = "WebsiteImageFinder/0.5.0 (https://github.com/Bl0ck154/website-image-finder-skill)"
 SERPAPI_ENDPOINT = "https://serpapi.com/search.json"
 OPENVERSE_ENDPOINT = "https://api.openverse.org/v1/images/"
 WIKIMEDIA_ENDPOINT = "https://commons.wikimedia.org/w/api.php"
@@ -328,13 +331,15 @@ def create_session() -> Any:
         from urllib3.util.retry import Retry
     except ImportError as exc:
         raise SkillError("Missing requests. Install it with: py -3 -m pip install --user requests") from exc
+    # Retry transient server outages, but never retry HTTP 429 automatically:
+    # free search APIs should be allowed to enforce their rate limits.
     retry = Retry(
-        total=1,
+        total=2,
         connect=1,
         read=0,
-        status=0,
-        backoff_factor=0.4,
-        status_forcelist=(),
+        status=2,
+        backoff_factor=0.6,
+        status_forcelist=(500, 502, 503, 504),
         allowed_methods=frozenset({"GET"}),
         respect_retry_after_header=False,
         raise_on_status=False,
@@ -1230,6 +1235,7 @@ def validate_args(args: argparse.Namespace) -> None:
 def main() -> int:
     args = parse_args()
     session = None
+    started_at = time.monotonic()
     try:
         validate_args(args)
         root = Path(args.root).resolve()
@@ -1294,6 +1300,7 @@ def main() -> int:
         all_candidates: list[Candidate] = []
         warnings_list: list[str] = []
         providers_used: list[str] = []
+        provider_calls: dict[str, int] = {}
         secrets = [api_key]
         ddgs_version_value = installed_ddgs_version()
         ddgs_actual_sources: list[str] = []
@@ -1326,6 +1333,7 @@ def main() -> int:
                 query_results: list[Candidate] = []
                 for page in range(args.page, args.page + args.pages):
                     for provider in provider_chain:
+                        provider_calls[provider] = provider_calls.get(provider, 0) + 1
                         try:
                             if provider == "serpapi":
                                 found = search_serpapi(
@@ -1396,6 +1404,7 @@ def main() -> int:
             "created_at": now_iso(),
             "requested_provider": requested_provider,
             "providers_used": providers_used,
+            "metrics": {"provider_calls": provider_calls, "elapsed_seconds": None, "cache_reused": reused_payload is not None},
             "ddgs_version": ddgs_version_value,
             "requested_backend": args.ddgs_backend,
             "actual_sources": ddgs_actual_sources,
@@ -1425,14 +1434,19 @@ def main() -> int:
         sheet = None
         batch_file = None
         urls_file = None
+        review_file = None
         if args.batch_size > 0 and candidates:
             batch_candidates, attempts = download_next_batch(session, candidates, out_dir, download_settings, args.batch_size, args.max_attempts)
             if batch_candidates:
                 batch_number = batch_candidates[0].batch or 1
                 sheet, batch_file = write_batch_outputs(batch_candidates, out_dir, batch_number)
-            write_cache(cache_path, cache_payload, candidates)
+                review_file = save_review_report(batch_candidates, out_dir, args.orientation, batch_number)
         else:
             urls_file = write_urls(candidates, out_dir)
+        cache_payload["metrics"]["elapsed_seconds"] = round(time.monotonic() - started_at, 3)
+        cache_payload["metrics"]["download_attempts"] = attempts
+        cache_payload["metrics"]["downloaded"] = len(batch_candidates)
+        write_cache(cache_path, cache_payload, candidates)
 
         print(f"Providers used: {', '.join(providers_used) or 'none'}")
         print(f"Found unique results: {len(candidates)}")
@@ -1445,6 +1459,8 @@ def main() -> int:
                 print(f"Candidate list: {out_dir / batch_file}")
             if sheet:
                 print(f"Contact sheet: {out_dir / sheet}")
+            if review_file:
+                print(f"Technical shortlist: {review_file}")
             if cache_summary(candidates)["remaining_unattempted"]:
                 print(f"More cached candidates are available. Run: skill.py more --root {root} --run {out_dir}")
         if warnings_list:

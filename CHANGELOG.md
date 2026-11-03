@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.0
+
+- Create a private technical shortlist after each downloaded batch. Scores use measured image dimensions, aspect ratio, search-title overlap and source metadata, with per-factor explanations.
+- Add the review command for ranking all downloaded candidates in an existing run. The original candidate search rank remains the identifier used when finalizing a file.
+- Add the evaluate command for privacy-safe operational comparisons of cached runs, reporting provider invocations, usable downloads, failures, duplicates, cache hits and available timings.
+- Record first-search provider invocations, observed duration and download attempts in new caches.
+- Add bounded retries for transient provider server errors (500, 502, 503, 504); do not retry HTTP 429 rate limits automatically.
+- Add practical usage examples, a measurement protocol and issue/PR templates for outside contributors.
+- Expand tests for ranking, path safety, evaluation metrics and retry settings.
+
 ## 0.4.0
 
 - Never select paid SerpApi in automatic search mode, even when an API key exists; explicit `--provider serpapi` remains supported.

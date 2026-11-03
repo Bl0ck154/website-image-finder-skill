@@ -17,12 +17,13 @@ Works with compatible Agent Skills clients, including Claude Code, Codex and Cur
 - Keyless DDGS, Openverse and Wikimedia Commons discovery
 - Openverse for license-oriented image discovery (not automatic legal clearance)
 - Local `results-cache.json` for resume and provenance; cross-run search reuse defaults to 24 hours
-- Review batches via compact `candidates-XX.json`
+- Review batches via compact `candidates-XX.json` plus an explainable technical shortlist
 - Dense justified `contact-sheet-XX.jpg` previews
 - Next-batch downloads without another search-provider call
 - Actual file validation, minimum dimensions, size limits, and duplicate filtering
 - WebP/PNG/JPEG finalization with **private**, gitignored source metadata
-- Explicit SerpApi request budget and sensible exit codes
+- Explicit SerpApi request budget, bounded provider retries, and sensible exit codes
+- Private run evaluation for measuring search/download reliability without sharing image URLs
 - Python 3.10+; prepares isolated dependencies automatically on first use
 
 ## Install and try it
@@ -86,13 +87,14 @@ Explicit `$website-image-finder` invocation is the most reliable. Compatible age
 
 ## Output workflow
 
-The first search creates:
+The first successful downloaded batch creates:
 
 ```text
 .image-search/<run>/
 ├── results-cache.json
 ├── candidates-01.json
 ├── contact-sheet-01.jpg
+├── review-batch-01.json
 └── downloaded candidate files
 ```
 
@@ -109,6 +111,32 @@ Matching results are reused for 24 hours by default (same queries, filters and p
 For explicitly selected SerpApi, at most three search requests per run are allowed by default. Multi-query or multi-page searches can raise the cap with `--max-serpapi-requests N` (up to 15). Each SerpApi page can consume a search credit.
 
 If downloads fail, `search` reports exit code `3` rather than incorrectly claiming complete success; `--batch-size 0` still succeeds when URLs are found. `more` also returns `3` if no additional usable candidates are produced.
+
+## Technical shortlist and run evaluation
+
+Each successful review batch now produces a private report named review-batch-XX.json. It ranks the downloaded images using their **measured** dimensions, aspect-ratio fit, title-word overlap and available source metadata. Scores come with a breakdown and reasons. They do not evaluate artistic quality, the accuracy of depicted subjects, the site's brand identity, or whether a license is legally sufficient.
+
+To review candidates saved across batches:
+
+~~~sh
+python3 <SKILL_DIR>/scripts/skill.py review --root . --run .image-search/<run> --top 5
+~~~
+
+The review output uses each image's original search rank (for example #7). Use that rank with the finalize command, even if the image is first in the technical shortlist.
+
+To measure search behavior from saved caches without additional provider requests:
+
+~~~sh
+python3 <SKILL_DIR>/scripts/skill.py evaluate --root . --latest 10
+~~~
+
+It summarizes provider invocations, observed first-batch duration, successful downloads and failures. Historical runs without metrics are marked incomplete. Evaluation output omits original source URLs. This does not measure time saved by the AI agent or subjective image relevance. For practical examples and a fair comparison with normal agent search, see [Usage examples](docs/EXAMPLES.md) and [Evaluation guide](docs/EVALUATION.md).
+
+## Why use it instead of an agent's ordinary image search?
+
+A coding agent with web search can already find image URLs. This skill provides a repeatable workflow for downloading candidates, rejecting broken or duplicate files, inspecting a contact sheet, resuming results without a new provider search, exporting optimized website assets and keeping source metadata in the project. The new shortlist helps prioritize manual review. **You still need the agent or a person to judge visual fit and verify reuse rights.**
+
+There is no demonstrated speed advantage or adoption claim in this repository yet; the evaluation guide explains how to measure both on identical website tasks.
 
 ## Source metadata, privacy and deployment
 

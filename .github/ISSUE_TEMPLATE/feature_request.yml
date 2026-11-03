@@ -1,0 +1,21 @@
+name: Feature request
+description: Suggest a change that would help your website workflow
+title: "Feature: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What website task are you trying to finish?
+    validations:
+      required: true
+  - type: textarea
+    id: request
+    attributes:
+      label: What behavior would make this easier?
+    validations:
+      required: true
+  - type: textarea
+    id: workaround
+    attributes:
+      label: What have you tried instead?

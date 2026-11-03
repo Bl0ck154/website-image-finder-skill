@@ -10,11 +10,13 @@ from pathlib import Path
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = SKILL_DIR / "scripts"
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 COMMANDS = {
     "search": SCRIPTS_DIR / "image_search.py",
     "more": SCRIPTS_DIR / "download_more.py",
     "finalize": SCRIPTS_DIR / "finalize_image.py",
+    "review": SCRIPTS_DIR / "review_candidates.py",
+    "evaluate": SCRIPTS_DIR / "evaluate_runs.py",
 }
 READY_PROBE = "import requests; from PIL import features; assert features.check('webp')"
 
@@ -141,7 +143,7 @@ def main() -> int:
         print("Python 3.10 or newer is required.", file=sys.stderr)
         return 2
     if len(sys.argv) < 2 or sys.argv[1] in {"-h", "--help"}:
-        print("Usage: python skill.py {search|more|finalize|check|setup} [arguments...]")
+        print("Usage: python skill.py {search|more|finalize|review|evaluate|check|setup} [arguments...]")
         print("Free search needs no API key. First run installs dependencies into an isolated environment.")
         return 0
     if sys.argv[1] in {"-V", "--version"}:

@@ -35,3 +35,15 @@ The image itself is intentionally not committed: a search result's license metad
 ## Testing scope
 
 GitHub Actions runs offline tests on Ubuntu, macOS and Windows. Those tests use mocks instead of paying for live provider requests. The smoke test above independently exercised a real Openverse search, remote image download and local output finalization in a temporary checkout, which was removed afterward.
+
+## Version 0.5.0: technical review and cross-run cache (2026-11-03)
+
+A fresh temporary project used the public Openverse API with a landscape query, a commercial/modification metadata filter, and one review download.
+
+- First run: 12 unique search results, 1 successfully downloaded image, 1 Openverse search-provider invocation.
+- The generated review-batch-01.json contained 1 measurable image with a technical score of 68.5/100 for the observed 1024x768 raster. This is a metadata-based score, not a visual quality or licensing judgement.
+- Running review over that cache created review-all.json without a provider request.
+- A second matching search within the 24-hour window reused the cache, downloaded a candidate, and recorded 0 new search-provider invocations.
+- The evaluator summarized both runs: 2 runs with successful downloads, 2 downloaded candidates, 1 Openverse invocation total, 1 cache reuse. The observed median initial search/first-batch duration was 1.538 seconds on that host at that time.
+
+The temporary checkout and images were removed. The report does not establish time saved over a normal AI agent, independent user adoption, or legal reuse rights.

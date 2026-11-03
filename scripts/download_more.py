@@ -8,6 +8,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from review_candidates import save_review_report
+
 from common import SkillError, atomic_write_json, redact, resolve_under_root, prepare_private_workdir
 from image_search import (
     CACHE_FILENAME,
@@ -83,9 +85,11 @@ def main() -> int:
         )
         sheet = None
         batch_file = None
+        review_file = None
         if downloaded:
             batch_number = downloaded[0].batch or 1
             sheet, batch_file = write_batch_outputs(downloaded, run_dir, batch_number)
+            review_file = save_review_report(downloaded, run_dir, payload.get("search_settings", {}).get("orientation", "any"), batch_number)
         write_cache(cache_path, payload, candidates)
 
         summary = cache_summary(candidates)
@@ -101,6 +105,8 @@ def main() -> int:
             print(f"Candidate list: {run_dir / batch_file}")
         if sheet:
             print(f"Contact sheet: {run_dir / sheet}")
+        if review_file:
+            print(f"Technical shortlist: {review_file}")
         print(f"Remaining unattempted: {summary['remaining_unattempted']}")
         print(f"Search cache: {cache_path}")
         return 0
