@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -35,7 +36,7 @@ from common import (
     validate_remote_url_syntax,
 )
 
-USER_AGENT = "WebsiteImageFinder/0.2.1 (+Agent Skill; image asset research)"
+USER_AGENT = "WebsiteImageFinder/0.4.0 (https://github.com/Bl0ck154/website-image-finder-skill)"
 SERPAPI_ENDPOINT = "https://serpapi.com/search.json"
 OPENVERSE_ENDPOINT = "https://api.openverse.org/v1/images/"
 MAX_REDIRECTS = 5
@@ -1059,18 +1060,31 @@ def find_reusable_cache(
     return max(matches, key=lambda item: item[0])[1]
 
 
+def provider_order(requested: str, license_filter: str, no_fallback: bool, *, ddgs_available: bool | None = None) -> list[str]:
+    """Explicit paid providers are opt-in; automatic search never uses paid APIs."""
+    if requested != "auto":
+        return [requested]
+    # License-restricted queries must not silently fall through to unverified licenses.
+    if license_filter in {"creative-commons", "commercial", "modify", "commercial-modify"}:
+        return ["openverse"]
+    if ddgs_available is None:
+        ddgs_available = importlib.util.find_spec("ddgs") is not None
+    chain = ["ddgs", "openverse"] if ddgs_available else ["openverse"]
+    return chain[:1] if no_fallback else chain
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("query", help="Primary image-search query")
     parser.add_argument("--extra-query", action="append", default=[], help="Additional query; repeatable")
-    parser.add_argument("--provider", choices=["auto", "serpapi", "ddgs", "openverse"], default="auto")
+    parser.add_argument("--provider", choices=["auto", "serpapi", "ddgs", "openverse"], default="auto", help="auto uses free sources only; SerpApi is opt-in")
     parser.add_argument("--no-provider-fallback", action="store_true", help="Do not fall back between search providers")
     parser.add_argument("--ddgs-backend", choices=["auto", "bing", "duckduckgo"], default="auto")
     parser.add_argument("--root", default=".", help="Project root; output must stay inside it")
     parser.add_argument("--out", default=None, help="Output directory; default is .image-search/<slug>-<UTC timestamp>")
     parser.add_argument("--overwrite-output", action="store_true", help="Allow a non-empty output directory")
     parser.add_argument("--max-results", type=int, default=60, help="Maximum results requested per query per page")
-    parser.add_argument("--reuse-cache-hours", type=int, default=0, help="Reuse matching search results from prior runs up to N hours old (0 disables)")
+    parser.add_argument("--reuse-cache-hours", type=int, default=24, help="Reuse matching search results from prior runs up to N hours old (default 24; 0 disables)")
     parser.add_argument("--max-serpapi-requests", type=int, default=3, help="Prevent accidental paid search spikes; increase explicitly for multi-page searches")
     parser.add_argument("--pages", type=int, default=1, help="Number of result pages per query (1-3; each SerpApi page may use a search credit)")
     parser.add_argument("--page", type=int, default=1, help="Starting provider page, 1-based")
@@ -1163,13 +1177,10 @@ def main() -> int:
 
         api_key = (os.environ.get("SERPAPI_API_KEY") or os.environ.get("SERPAPI_KEY") or "").strip()
         requested_provider = args.provider
-        primary_provider = requested_provider
-        if primary_provider == "auto":
-            primary_provider = "openverse" if args.license_filter == "creative-commons" else ("serpapi" if api_key else "ddgs")
-        if primary_provider == "serpapi" and not api_key:
-            if requested_provider == "serpapi":
-                raise SkillError("SERPAPI_API_KEY or SERPAPI_KEY is required for --provider serpapi")
-            primary_provider = "ddgs"
+        provider_chain = provider_order(requested_provider, args.license_filter, args.no_provider_fallback)
+        primary_provider = provider_chain[0]
+        if requested_provider == "serpapi" and not api_key:
+            raise SkillError("SERPAPI_API_KEY or SERPAPI_KEY is required for --provider serpapi")
 
         search_settings = {
             "region": args.region,
@@ -1188,6 +1199,7 @@ def main() -> int:
             "blocked_domains": blocked_domains,
             "ddgs_backend": args.ddgs_backend,
             "no_provider_fallback": args.no_provider_fallback,
+            "provider_policy": "free-first-v1",
         }
         reused_payload = find_reusable_cache(
             root, queries, search_settings, requested_provider, args.reuse_cache_hours, out_dir
@@ -1230,13 +1242,6 @@ def main() -> int:
             ddgs_actual_sources = list(reused_payload.get("actual_sources") or [])
             warnings_list.append("Reused matching cached provider results; no new search requests")
         else:
-            provider_chain = [primary_provider]
-            if requested_provider == "auto" and not args.no_provider_fallback:
-                if primary_provider == "serpapi":
-                    provider_chain.extend(["ddgs", "openverse"])
-                elif primary_provider == "ddgs":
-                    provider_chain.append("openverse")
-
             for query in queries:
                 query_results: list[Candidate] = []
                 for page in range(args.page, args.page + args.pages):
