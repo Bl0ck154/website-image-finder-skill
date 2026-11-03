@@ -1453,9 +1453,109 @@ def main() -> int:
         urls_file = None
         review_file = None
         if args.batch_size > 0 and candidates:
-            batch_candidates, attempts = download_next_batch(session, candidates, out_dir, download_settings, args.batch_size, args.max_attempts)
+            can_retry_free = (
+                requested_provider == "auto"
+                and not args.no_provider_fallback
+                and len(provider_chain) > 1 and args.max_attempts > 1
+            )
+            first_budget = (
+                max(1, min(args.max_attempts - 1, args.max_attempts * 2 // 3))
+                if can_retry_free else args.max_attempts
+            )
+            batch_candidates, attempts = download_next_batch(
+                session, candidates, out_dir, download_settings, args.batch_size, first_budget
+            )
+            remaining = args.max_attempts - attempts
+            if can_retry_free and not batch_candidates and remaining > 0:
+                # Search-result URLs may all fail to download (expired links,
+                # hotlink restrictions, 403s). Fall through to other free providers.
+                existing = {canonical_url(item.image_url) for item in candidates}
+                used = set(providers_used)
+                for provider in provider_chain:
+                    if provider in used or batch_candidates or remaining <= 0:
+                        continue
+                    for query in queries:
+                        if batch_candidates or remaining <= 0:
+                            break
+                        for page in range(args.page, args.page + args.pages):
+                            if batch_candidates or remaining <= 0:
+                                break
+                            provider_calls[provider] = provider_calls.get(provider, 0) + 1
+                            try:
+                                if provider == "ddgs":
+                                    found = record_ddgs_batch(search_ddgs(
+                                        query, args.max_results, args.region, page, args.ddgs_backend,
+                                        args.orientation, args.image_type, args.license_filter,
+                                        args.safe_search, args.size, args.color, args.time_limit,
+                                    ))
+                                elif provider == "openverse":
+                                    found = search_openverse(
+                                        session, query, args.max_results, page, args.orientation,
+                                        args.image_type, args.license_filter, args.safe_search,
+                                        args.size, args.color, args.time_limit,
+                                    )
+                                else:
+                                    found = search_wikimedia(
+                                        session, query, args.max_results, page, args.orientation,
+                                        args.image_type, args.license_filter, args.safe_search,
+                                        args.size, args.color, args.time_limit,
+                                    )
+                                if provider not in providers_used:
+                                    providers_used.append(provider)
+                            except Exception as exc:
+                                warnings_list.append(redact(
+                                    f"Download recovery via {provider}: {type(exc).__name__}: {exc}",
+                                    secrets,
+                                ))
+                                continue
+                            fresh = []
+                            for item in found:
+                                url_key = canonical_url(item.image_url)
+                                if url_key in existing:
+                                    continue
+                                if allowed_domains and not (
+                                    host_matches(item.source_page_url, allowed_domains)
+                                    or host_matches(item.image_url, allowed_domains)
+                                ):
+                                    continue
+                                if blocked_domains and (
+                                    host_matches(item.source_page_url, blocked_domains)
+                                    or host_matches(item.image_url, blocked_domains)
+                                ):
+                                    continue
+                                item.score = score_candidate(item, preferred_domains, args.orientation)
+                                existing.add(url_key)
+                                fresh.append(item)
+                            if not fresh:
+                                continue
+                            candidates.extend(fresh)
+                            candidates.sort(key=lambda item: (-item.score, item.provider_position, item.id))
+                            for rank, item in enumerate(candidates, 1):
+                                item.rank = rank
+                            extra, used_attempts = download_next_batch(
+                                session, candidates, out_dir, download_settings, args.batch_size, remaining
+                            )
+                            attempts += used_attempts
+                            remaining -= used_attempts
+                            if extra:
+                                batch_candidates.extend(extra)
+                                warnings_list.append(
+                                    f"Recovered a download through free provider {provider}"
+                                )
+                                break
+            elif batch_candidates and len(batch_candidates) < args.batch_size and remaining > 0:
+                # Use remaining attempts on existing candidates when the first
+                # reservation was unnecessary because some downloads succeeded.
+                extra, used_attempts = download_next_batch(
+                    session, candidates, out_dir, download_settings,
+                    args.batch_size - len(batch_candidates), remaining,
+                )
+                attempts += used_attempts
+                batch_candidates.extend(extra)
             if batch_candidates:
-                batch_number = batch_candidates[0].batch or 1
+                for item in batch_candidates:
+                    item.batch = 1
+                batch_number = 1
                 sheet, batch_file = write_batch_outputs(batch_candidates, out_dir, batch_number)
                 review_file = save_review_report(batch_candidates, out_dir, args.orientation, batch_number)
         else:
