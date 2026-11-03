@@ -163,7 +163,7 @@ class ProviderTests(unittest.TestCase):
              mock.patch.object(image_search, "create_session") as client, \
              mock.patch.object(sys, "argv", [
                  "image_search.py", "office", "--extra-query", "garden",
-                 "--root", root, "--batch-size", "0", "--pages", "3",
+                 "--root", root, "--provider", "serpapi", "--batch-size", "0", "--pages", "3",
              ]), contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(image_search.main(), 2)
             client.assert_not_called()
