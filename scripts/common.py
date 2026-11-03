@@ -72,7 +72,7 @@ def prepare_private_workdir(root: Path) -> Path:
     folder.mkdir(parents=True, exist_ok=True)
     ignore = folder / ".gitignore"
     if not ignore.exists():
-        atomic_write_text(ignore, "*\\n!.gitignore\\n".replace("\\\\n", "\\n"))
+        atomic_write_text(ignore, "*\n!.gitignore\n")
     return folder
 
 
