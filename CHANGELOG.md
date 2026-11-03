@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.2 (2026-11-03)
+
+- Extract provider adapters, candidate normalization, private search caches and
+  contact-sheet layout into separate modules; retain existing image_search
+  helper imports for compatibility.
+- Add an explicit, bounded diagnostic for live free-provider searches with
+  download and final WebP verification, without retaining downloaded images.
+- Refresh compatible Requests, DDGS and GitHub Actions versions.
+- Keep Pillow below 13 while supporting Python 3.10 and ignore incompatible
+  Dependabot major-version upgrades.
+- Add architecture documentation and expand regression coverage.
+
 ## 0.5.1 (2026-11-03)
 
 - Add image-purpose presets for hero photos, standard photos, logos, icons and illustrations; explicit size overrides remain available.
