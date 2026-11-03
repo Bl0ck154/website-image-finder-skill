@@ -112,7 +112,7 @@ If downloads fail, `search` reports exit code `3` rather than incorrectly claimi
 
 ## Source metadata, privacy and deployment
 
-The finalizer writes source information to `.image-search/provenance/<asset-relative-path>.source.json` inside your project (not next to `public/images/...`). The repository ignores `.image-search/` in Git. Keep this directory **out of web hosting and version control**: original image URLs can contain temporary signed query parameters. Do not upload search caches to public storage.
+The finalizer writes source information to `.image-search/provenance/<asset-relative-path>.source.json` inside your project (not next to `public/images/...`). When image commands run, the skill creates `.image-search/.gitignore` to exclude cached results, source URLs and optional project-local Python packages from normal `git add` operations. **Keep `.image-search/` out of web hosting and version control**: signed source URLs may contain sensitive query parameters. Do not upload search caches to public storage.
 
 Example with a locally downloaded candidate:
 

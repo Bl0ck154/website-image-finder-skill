@@ -8,6 +8,7 @@
 - Recognize managed Python environments in the `check` command and preserve the manual `setup` option.
 - Reuse matching search results for 24 hours by default; opt out with `--reuse-cache-hours 0`.
 - Strengthen offline tests for paid-provider isolation, Wikimedia metadata, automatic setup and portability.
+- Add local Git ignore rules to protect private image caches and optional project-local dependencies by default.
 - Update onboarding, compatibility notes and the skill prompt for a free-first experience.
 
 ## 0.3.0

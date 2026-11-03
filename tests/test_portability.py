@@ -273,8 +273,7 @@ class SafetyTests(unittest.TestCase):
             root = Path(folder)
             private = common.prepare_private_workdir(root)
             ignored = (private / ".gitignore").read_text(encoding="utf-8")
-            self.assertIn("*", ignored)
-            self.assertIn("!.gitignore", ignored)
+            self.assertEqual(ignored, "*\n!.gitignore\n")
             self.assertEqual(common.prepare_private_workdir(root), private)
 
     def test_traversal_rejected(self):
