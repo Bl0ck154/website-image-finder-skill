@@ -1187,6 +1187,7 @@ def main() -> int:
             "allowed_domains": allowed_domains,
             "blocked_domains": blocked_domains,
             "ddgs_backend": args.ddgs_backend,
+            "no_provider_fallback": args.no_provider_fallback,
         }
         reused_payload = find_reusable_cache(
             root, queries, search_settings, requested_provider, args.reuse_cache_hours, out_dir
@@ -1229,58 +1230,51 @@ def main() -> int:
             ddgs_actual_sources = list(reused_payload.get("actual_sources") or [])
             warnings_list.append("Reused matching cached provider results; no new search requests")
         else:
+            provider_chain = [primary_provider]
+            if requested_provider == "auto" and not args.no_provider_fallback:
+                if primary_provider == "serpapi":
+                    provider_chain.extend(["ddgs", "openverse"])
+                elif primary_provider == "ddgs":
+                    provider_chain.append("openverse")
+
             for query in queries:
                 query_results: list[Candidate] = []
-                provider_for_query = primary_provider
                 for page in range(args.page, args.page + args.pages):
-                    try:
-                        if provider_for_query == "serpapi":
-                            found = search_serpapi(session, query, api_key, args.max_results, args.region, page, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit)
-                        elif provider_for_query == "ddgs":
-                            found = record_ddgs_batch(search_ddgs(query, args.max_results, args.region, page, args.ddgs_backend, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit))
-                        else:
-                            found = search_openverse(session, query, args.max_results, page, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit)
-                        if provider_for_query not in providers_used:
-                            providers_used.append(provider_for_query)
-                        if provider_for_query == "serpapi" and not found and not args.no_provider_fallback and requested_provider == "auto":
-                            fallback_found = record_ddgs_batch(search_ddgs(query, args.max_results, args.region, page, args.ddgs_backend, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit))
-                            if "ddgs" not in providers_used:
-                                providers_used.append("ddgs")
-                            query_results.extend(fallback_found)
-                            warnings_list.append(f"{query} page {page}: SerpApi returned no images; used DDGS fallback")
-                        elif provider_for_query == "ddgs" and not found and not args.no_provider_fallback and requested_provider == "auto":
-                            fallback_found = search_openverse(session, query, args.max_results, page, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit)
-                            if "openverse" not in providers_used:
-                                providers_used.append("openverse")
-                            query_results.extend(fallback_found)
-                            warnings_list.append(f"{query} page {page}: DDGS returned no images; used Openverse fallback")
-                        else:
-                            query_results.extend(found)
-                    except Exception as exc:
-                        warnings_list.append(redact(f"{query} page {page} via {provider_for_query}: {type(exc).__name__}: {exc}", secrets))
-                        if provider_for_query == "serpapi" and not args.no_provider_fallback and requested_provider == "auto":
-                            provider_for_query = "ddgs"
-                            try:
-                                found = record_ddgs_batch(search_ddgs(query, args.max_results, args.region, page, args.ddgs_backend, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit))
-                                if "ddgs" not in providers_used:
-                                    providers_used.append("ddgs")
+                    for provider in provider_chain:
+                        try:
+                            if provider == "serpapi":
+                                found = search_serpapi(
+                                    session, query, api_key, args.max_results, args.region, page,
+                                    args.orientation, args.image_type, args.license_filter,
+                                    args.safe_search, args.size, args.color, args.time_limit,
+                                )
+                            elif provider == "ddgs":
+                                found = record_ddgs_batch(search_ddgs(
+                                    query, args.max_results, args.region, page, args.ddgs_backend,
+                                    args.orientation, args.image_type, args.license_filter,
+                                    args.safe_search, args.size, args.color, args.time_limit,
+                                ))
+                            else:
+                                found = search_openverse(
+                                    session, query, args.max_results, page, args.orientation,
+                                    args.image_type, args.license_filter, args.safe_search,
+                                    args.size, args.color, args.time_limit,
+                                )
+                            if provider not in providers_used:
+                                providers_used.append(provider)
+                            if found:
                                 query_results.extend(found)
-                                warnings_list.append(f"{query} page {page}: fell back from SerpApi to DDGS")
-                            except Exception as fallback_exc:
-                                warnings_list.append(redact(f"{query} page {page} DDGS fallback: {type(fallback_exc).__name__}: {fallback_exc}", secrets))
-                        elif provider_for_query == "ddgs" and not args.no_provider_fallback and requested_provider == "auto":
-                            try:
-                                found = search_openverse(session, query, args.max_results, page, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit)
-                                if "openverse" not in providers_used:
-                                    providers_used.append("openverse")
-                                query_results.extend(found)
-                                warnings_list.append(f"{query} page {page}: fell back from DDGS to Openverse")
-                            except Exception as fallback_exc:
-                                warnings_list.append(redact(f"{query} page {page} Openverse fallback: {type(fallback_exc).__name__}: {fallback_exc}", secrets))
+                                break
+                            warnings_list.append(f"{query} page {page}: {provider} returned no images")
+                        except Exception as exc:
+                            warnings_list.append(redact(
+                                f"{query} page {page} via {provider}: {type(exc).__name__}: {exc}",
+                                secrets,
+                            ))
+                    # Exhaustion is permitted; do not claim a usable download.
                 for candidate in query_results:
                     candidate.score = score_candidate(candidate, preferred_domains, args.orientation)
                 all_candidates.extend(query_results)
-
 
         candidates = merge_candidates(all_candidates)
         if allowed_domains:
