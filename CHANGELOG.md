@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0
+
+- Added Openverse search with source-license metadata and a no-key automatic fallback.
+- Route Creative Commons searches to Openverse in automatic mode; stop treating DDGS as a verified CC filter.
+- Default to region `auto` rather than `lt-lt`; omit fixed Google country/language settings and use DDGS worldwide routing.
+- Save source provenance in private, gitignored `.image-search/provenance/` instead of alongside public website assets.
+- Return non-success for searches or cached batches that download no usable images.
+- Retry failed and undersized candidates with optional minimum-size overrides.
+- Add opt-in cross-run search cache reuse (`--reuse-cache-hours`) and an explicit SerpApi request budget.
+- Test providers, source safety, Windows, macOS and Ubuntu with expanded offline CI.
+- Document installation, provider limitations, privacy, licensing and troubleshooting.
+
 ## 0.2.1
 
 - Record the installed DDGS version, requested backend, and actual image-search sources in `results-cache.json`.

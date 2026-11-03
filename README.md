@@ -2,9 +2,9 @@
 
 [![skills.sh](https://skills.sh/b/Bl0ck154/website-image-finder-skill)](https://skills.sh/Bl0ck154/website-image-finder-skill)
 
-A lightweight Agent Skill for finding, reviewing, optimizing, and integrating public-web images into website projects.
+Find **real web images for websites with AI coding agents**. Search, compare candidate previews, remove duplicates, optimize website assets, and keep the original source information private.
 
-It supports Google Images through SerpApi and DDGS image search as the no-key fallback. Search results are cached once, while image candidates are reviewed in additional batches without repeating the search API request.
+Works with compatible Agent Skills clients (including Claude Code, Codex, Cursor, and other coding agents that can run Python with network access). Search through Google Images (SerpApi), DDGS, or **Openverse**. No paid search key is required when using DDGS or Openverse. Results can be reviewed in batches without repeating provider searches.
 
 <p align="center"><img src="assets/workflow.gif" alt="Illustrated workflow: image search, candidate review, cache reuse and optimized export" width="800" /></p>
 <p align="center"><sub>Illustrative walkthrough with synthetic placeholders, not live search results. Verify image reuse rights before publication.</sub></p>
@@ -13,14 +13,16 @@ It supports Google Images through SerpApi and DDGS image search as the no-key fa
 
 - Provider-side filters for layout, size, type, color, time, license, and domains
 - Google Images through SerpApi
-- DDGS / DuckDuckGo Images fallback without an API key
-- Local `results-cache.json` for resume and provenance
+- DDGS / DuckDuckGo Images with Openverse as a fallback, without an API key
+- Openverse for license-oriented image discovery (not automatic legal clearance)
+- Local `results-cache.json` for resume and provenance, with opt-in reuse across runs
 - Review batches via compact `candidates-XX.json`
 - Dense justified `contact-sheet-XX.jpg` previews
 - Next-batch downloads without another search-provider call
 - Actual file validation, minimum dimensions, size limits, and duplicate filtering
-- WebP/PNG/JPEG finalization with source sidecar metadata
-- No virtual environment required
+- WebP/PNG/JPEG finalization with **private**, gitignored source metadata
+- Explicit SerpApi request budget and sensible exit codes
+- Python 3.10+; supports existing environments or virtual environments
 
 ## Install
 
@@ -30,7 +32,17 @@ It supports Google Images through SerpApi and DDGS image search as the no-key fa
 npx skills add Bl0ck154/website-image-finder-skill
 ```
 
-Choose your AI coding agent when prompted. Install the Python dependencies from the resulting skill directory with `python -m pip install -r requirements.txt`. The Skills CLI installs the skill files; it does not replace the Python dependencies used by its scripts.
+Choose your AI coding agent when prompted. The Skills CLI installs the skill files but **not** their Python dependencies. If your Python environment permits package installation, run `python -m pip install -r <SKILL_DIR>/requirements.txt` with the same Python executable your agent uses for this skill.
+
+For an isolated Python environment on Linux/macOS, substitute the actual installed skill directory:
+```sh
+SKILL_DIR="$HOME/.agents/skills/website-image-finder"
+python3 -m venv "$SKILL_DIR/.venv"
+"$SKILL_DIR/.venv/bin/python" -m pip install -r "$SKILL_DIR/requirements.txt"
+"$SKILL_DIR/.venv/bin/python" "$SKILL_DIR/scripts/skill.py" check
+```
+
+When using an isolated environment, instruct your AI agent to invoke the skill using that environment's Python. On Windows, use `$SKILL_DIR\.venv\Scripts\python.exe` for a virtual environment, or the included PowerShell installer for a user-wide installation.
 
 ### Manual installation
 
@@ -62,16 +74,22 @@ py -3 "$env:USERPROFILE\.agents\skills\website-image-finder\scripts\skill.py" ch
 
 DDGS backend availability varies by DDGS version. The skill verifies the actual source returned and does not assume that a requested backend was honored.
 
-The provider chain is:
+The provider selection in `--provider auto` mode is:
 
 ```text
-SerpApi Google Images
-  -> DDGS image search when no SerpApi key is configured or the SerpApi request fails
+--license creative-commons -> Openverse
+Other searches:
+  SerpApi Google Images (when an API key exists)
+    -> DDGS (on failures / no results)
+    -> Openverse (when DDGS fails or returns no results)
+Without an API key: DDGS -> Openverse
 ```
+
+You may select `--provider openverse` directly. It provides license metadata and uses public API endpoints without a key. Unsupported provider filters fail rather than being silently ignored. Explicit provider choices do not fall back; `--no-provider-fallback` also disables automatic fallback.
 
 DDGS is one fallback provider, not a promise of two independent Bing and DuckDuckGo fallbacks. `--ddgs-backend bing` remains available for DDGS versions that actually provide Bing Images. If the installed DDGS version substitutes another engine, the command records the mismatch and exits with an error.
 
-The search cache records runtime provenance:
+The search cache records runtime provenance, including the actual DDGS engine used:
 
 ```json
 {
@@ -113,7 +131,39 @@ If the first batch is unsuitable:
 py -3 <SKILL_DIR>\scripts\skill.py more --root . --run .image-search\<run> --count 12
 ```
 
-This uses the existing cache and creates the next batch without calling SerpApi, Bing, or DuckDuckGo search again.
+This uses the existing cache and creates the next batch without calling any search provider again.
+
+To reuse matching search results between separate runs (with identical queries, filters and provider selection), add `--reuse-cache-hours 24` to `search`. This reuses search **metadata**, not old downloaded images. It is opt-in; `0` disables reuse. The default region is `auto` instead of a country-specific locale.
+
+For SerpApi, at most three search requests per run are allowed by default. Multi-query or multi-page searches can raise the cap explicitly with `--max-serpapi-requests N` (up to 15). Each SerpApi page can consume a search credit.
+
+If downloads fail, `search` reports exit code `3` rather than incorrectly claiming complete success; `--batch-size 0` still succeeds when URLs are found. `more` also returns `3` if no additional usable candidates are produced.
+
+## Source metadata, privacy and deployment
+
+The finalizer writes source information to `.image-search/provenance/<asset-relative-path>.source.json` inside your project (not next to `public/images/...`). The repository ignores `.image-search/` in Git. Keep this directory **out of web hosting and version control**: original image URLs can contain temporary signed query parameters. Do not upload search caches to public storage.
+
+Example with a locally downloaded candidate:
+
+```sh
+python scripts/skill.py search "cozy modern workspace" --provider openverse --license commercial-modify --root . --batch-size 12
+python scripts/skill.py more --root . --run .image-search/<run> --count 12
+python scripts/skill.py finalize --root . --cache .image-search/<run>/results-cache.json --candidate 7 --output public/images/hero.webp
+```
+
+The agent should inspect the contact sheet, choose a relevant candidate, verify the original source's reuse conditions and integrate the resulting local image with useful alt text. It must not infer permission to publish from the search engine's metadata alone.
+
+## Compatibility and troubleshooting
+
+| Environment | Status / notes |
+| --- | --- |
+| Windows + Python 3.12 | Covered by offline GitHub Actions tests; PowerShell installer available |
+| macOS + Python 3.12 | Covered by offline tests; use pip or a virtual environment |
+| Ubuntu + Python 3.10 / 3.13 | Covered by offline tests; use pip or a virtual environment |
+| Other AI agents | Compatible with agents that recognize `SKILL.md` and can run Python/network commands |
+| Live search providers | External service availability, rates, blocks, and download permissions can vary |
+
+Quick diagnostics: `python scripts/skill.py check`, `python scripts/skill.py search --help`, and the `warnings`/candidate statuses in the run's cache. CI uses mocks and does **not** guarantee live external search.
 
 ## Copyright notice
 

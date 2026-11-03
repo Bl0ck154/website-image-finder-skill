@@ -17,7 +17,9 @@ python -m unittest discover -s tests -v
 python scripts/skill.py --version
 ```
 
-These are the checks used by CI. Changes that depend on live provider responses should also document the provider version and any rate-limit or availability assumptions; offline tests should not rely on live search services.
+These are the checks used by CI on Ubuntu, Windows and macOS. Any new provider or source handling behavior should have mocked offline tests (success, empty results, error/timeout, license metadata and fallbacks) and should never require live provider credentials in CI. Live provider testing, when available, is separate and may use paid credits.
+
+Keep private source manifests outside website `public/` paths; never commit signed image URLs, downloaded third-party images without redistribution rights or live provider credentials. Add an entry to CHANGELOG.md for user-facing behavior changes.
 
 ## Pull requests
 
