@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import math
 import os
 import re
@@ -11,7 +12,7 @@ import sys
 import tempfile
 import warnings
 from dataclasses import asdict, dataclass, field, fields
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from importlib.metadata import PackageNotFoundError, version as package_version
 from io import BytesIO
 from pathlib import Path
@@ -1020,17 +1021,57 @@ def write_cache(cache_path: Path, payload: dict[str, Any], candidates: list[Cand
     atomic_write_json(cache_path, payload)
 
 
+def find_reusable_cache(
+    root: Path,
+    queries: list[str],
+    settings: dict[str, Any],
+    provider: str,
+    hours: int,
+    exclude: Path,
+) -> dict[str, Any] | None:
+    """Reuse search metadata only for identical settings; never reuse old downloaded files."""
+    base = root / ".image-search"
+    if hours < 1 or not base.is_dir():
+        return None
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    matches: list[tuple[datetime, dict[str, Any]]] = []
+    for candidate_path in base.glob("*/results-cache.json"):
+        try:
+            path = resolve_under_root(candidate_path, root, label="reusable cache")
+            if path.parent == exclude:
+                continue
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if (payload.get("schema_version") != 3 or
+                payload.get("tool") != "website-image-finder" or
+                payload.get("requested_provider") != provider or
+                payload.get("queries") != queries or
+                payload.get("search_settings") != settings or
+                not payload.get("results") or not payload.get("providers_used")):
+                continue
+            created = datetime.fromisoformat(payload["created_at"])
+            if created.tzinfo is None or not cutoff <= created <= datetime.now(timezone.utc):
+                continue
+            matches.append((created, payload))
+        except (OSError, ValueError, TypeError, KeyError, SkillError):
+            continue
+    if not matches:
+        return None
+    return max(matches, key=lambda item: item[0])[1]
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("query", help="Primary image-search query")
     parser.add_argument("--extra-query", action="append", default=[], help="Additional query; repeatable")
     parser.add_argument("--provider", choices=["auto", "serpapi", "ddgs", "openverse"], default="auto")
-    parser.add_argument("--no-provider-fallback", action="store_true", help="Do not fall back from SerpApi to DDGS")
+    parser.add_argument("--no-provider-fallback", action="store_true", help="Do not fall back between search providers")
     parser.add_argument("--ddgs-backend", choices=["auto", "bing", "duckduckgo"], default="auto")
     parser.add_argument("--root", default=".", help="Project root; output must stay inside it")
     parser.add_argument("--out", default=None, help="Output directory; default is .image-search/<slug>-<UTC timestamp>")
     parser.add_argument("--overwrite-output", action="store_true", help="Allow a non-empty output directory")
     parser.add_argument("--max-results", type=int, default=60, help="Maximum results requested per query per page")
+    parser.add_argument("--reuse-cache-hours", type=int, default=0, help="Reuse matching search results from prior runs up to N hours old (0 disables)")
+    parser.add_argument("--max-serpapi-requests", type=int, default=3, help="Prevent accidental paid search spikes; increase explicitly for multi-page searches")
     parser.add_argument("--pages", type=int, default=1, help="Number of result pages per query (1-3; each SerpApi page may use a search credit)")
     parser.add_argument("--page", type=int, default=1, help="Starting provider page, 1-based")
     parser.add_argument("--batch-size", "--keep", dest="batch_size", type=int, default=12, help="Candidates in the first review batch; 0 means URLs only")
@@ -1068,6 +1109,10 @@ def validate_args(args: argparse.Namespace) -> None:
         raise SkillError("each query must be 300 characters or fewer")
     if any(len(values) > 50 for values in (args.preferred_domain, args.allowed_domain, args.blocked_domain)):
         raise SkillError("each domain filter list is limited to 50 entries")
+    if not 0 <= args.reuse_cache_hours <= 168:
+        raise SkillError("--reuse-cache-hours must be between 0 and 168")
+    if not 1 <= args.max_serpapi_requests <= 15:
+        raise SkillError("--max-serpapi-requests must be between 1 and 15")
     if args.max_results < 1 or args.max_results > 100:
         raise SkillError("--max-results must be between 1 and 100")
     if args.pages < 1 or args.pages > 3 or args.page < 1 or args.page > 20:
@@ -1126,6 +1171,32 @@ def main() -> int:
                 raise SkillError("SERPAPI_API_KEY or SERPAPI_KEY is required for --provider serpapi")
             primary_provider = "ddgs"
 
+        search_settings = {
+            "region": args.region,
+            "start_page": args.page,
+            "pages": args.pages,
+            "max_results_per_query_page": args.max_results,
+            "orientation": args.orientation,
+            "image_type": args.image_type,
+            "size": args.size,
+            "color": args.color,
+            "safe_search": args.safe_search,
+            "time_limit": args.time_limit,
+            "license_filter": args.license_filter,
+            "preferred_domains": preferred_domains,
+            "allowed_domains": allowed_domains,
+            "blocked_domains": blocked_domains,
+            "ddgs_backend": args.ddgs_backend,
+        }
+        reused_payload = find_reusable_cache(
+            root, queries, search_settings, requested_provider, args.reuse_cache_hours, out_dir
+        )
+        if (reused_payload is None and primary_provider == "serpapi" and
+            len(queries) * args.pages > args.max_serpapi_requests):
+            raise SkillError(
+                f"Up to {len(queries) * args.pages} SerpApi requests requested; "
+                f"use --max-serpapi-requests to permit this cost"
+            )
         session = create_session()
         all_candidates: list[Candidate] = []
         warnings_list: list[str] = []
@@ -1140,57 +1211,76 @@ def main() -> int:
             merge_unique(ddgs_actual_sources, batch.actual_sources)
             return batch.candidates
 
-        for query in queries:
-            query_results: list[Candidate] = []
-            provider_for_query = primary_provider
-            for page in range(args.page, args.page + args.pages):
-                try:
-                    if provider_for_query == "serpapi":
-                        found = search_serpapi(session, query, api_key, args.max_results, args.region, page, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit)
-                    elif provider_for_query == "ddgs":
-                        found = record_ddgs_batch(search_ddgs(query, args.max_results, args.region, page, args.ddgs_backend, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit))
-                    else:
-                        found = search_openverse(session, query, args.max_results, page, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit)
-                    if provider_for_query not in providers_used:
-                        providers_used.append(provider_for_query)
-                    if provider_for_query == "serpapi" and not found and not args.no_provider_fallback and requested_provider == "auto":
-                        fallback_found = record_ddgs_batch(search_ddgs(query, args.max_results, args.region, page, args.ddgs_backend, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit))
-                        if "ddgs" not in providers_used:
-                            providers_used.append("ddgs")
-                        query_results.extend(fallback_found)
-                        warnings_list.append(f"{query} page {page}: SerpApi returned no images; used DDGS fallback")
-                    elif provider_for_query == "ddgs" and not found and requested_provider == "auto":
-                        fallback_found = search_openverse(session, query, args.max_results, page, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit)
-                        if "openverse" not in providers_used:
-                            providers_used.append("openverse")
-                        query_results.extend(fallback_found)
-                        warnings_list.append(f"{query} page {page}: DDGS returned no images; used Openverse fallback")
-                    else:
-                        query_results.extend(found)
-                except Exception as exc:
-                    warnings_list.append(redact(f"{query} page {page} via {provider_for_query}: {type(exc).__name__}: {exc}", secrets))
-                    if provider_for_query == "serpapi" and not args.no_provider_fallback and requested_provider == "auto":
-                        provider_for_query = "ddgs"
-                        try:
+        if reused_payload is not None:
+            for saved in reused_payload["results"]:
+                if not isinstance(saved, dict):
+                    continue
+                item = candidate_from_dict(saved)
+                item.status = "found"
+                item.local_file = None
+                item.downloaded_url = None
+                item.sha256 = None
+                item.dhash = None
+                item.batch = None
+                item.error = None
+                all_candidates.append(item)
+            providers_used = list(reused_payload.get("providers_used", []))
+            ddgs_version_value = reused_payload.get("ddgs_version")
+            ddgs_actual_sources = list(reused_payload.get("actual_sources") or [])
+            warnings_list.append("Reused matching cached provider results; no new search requests")
+        else:
+            for query in queries:
+                query_results: list[Candidate] = []
+                provider_for_query = primary_provider
+                for page in range(args.page, args.page + args.pages):
+                    try:
+                        if provider_for_query == "serpapi":
+                            found = search_serpapi(session, query, api_key, args.max_results, args.region, page, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit)
+                        elif provider_for_query == "ddgs":
                             found = record_ddgs_batch(search_ddgs(query, args.max_results, args.region, page, args.ddgs_backend, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit))
+                        else:
+                            found = search_openverse(session, query, args.max_results, page, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit)
+                        if provider_for_query not in providers_used:
+                            providers_used.append(provider_for_query)
+                        if provider_for_query == "serpapi" and not found and not args.no_provider_fallback and requested_provider == "auto":
+                            fallback_found = record_ddgs_batch(search_ddgs(query, args.max_results, args.region, page, args.ddgs_backend, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit))
                             if "ddgs" not in providers_used:
                                 providers_used.append("ddgs")
-                            query_results.extend(found)
-                            warnings_list.append(f"{query} page {page}: fell back from SerpApi to DDGS")
-                        except Exception as fallback_exc:
-                            warnings_list.append(redact(f"{query} page {page} DDGS fallback: {type(fallback_exc).__name__}: {fallback_exc}", secrets))
-                    elif provider_for_query == "ddgs" and requested_provider == "auto":
-                        try:
-                            found = search_openverse(session, query, args.max_results, page, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit)
+                            query_results.extend(fallback_found)
+                            warnings_list.append(f"{query} page {page}: SerpApi returned no images; used DDGS fallback")
+                        elif provider_for_query == "ddgs" and not found and requested_provider == "auto":
+                            fallback_found = search_openverse(session, query, args.max_results, page, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit)
                             if "openverse" not in providers_used:
                                 providers_used.append("openverse")
+                            query_results.extend(fallback_found)
+                            warnings_list.append(f"{query} page {page}: DDGS returned no images; used Openverse fallback")
+                        else:
                             query_results.extend(found)
-                            warnings_list.append(f"{query} page {page}: fell back from DDGS to Openverse")
-                        except Exception as fallback_exc:
-                            warnings_list.append(redact(f"{query} page {page} Openverse fallback: {type(fallback_exc).__name__}: {fallback_exc}", secrets))
-            for candidate in query_results:
-                candidate.score = score_candidate(candidate, preferred_domains, args.orientation)
-            all_candidates.extend(query_results)
+                    except Exception as exc:
+                        warnings_list.append(redact(f"{query} page {page} via {provider_for_query}: {type(exc).__name__}: {exc}", secrets))
+                        if provider_for_query == "serpapi" and not args.no_provider_fallback and requested_provider == "auto":
+                            provider_for_query = "ddgs"
+                            try:
+                                found = record_ddgs_batch(search_ddgs(query, args.max_results, args.region, page, args.ddgs_backend, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit))
+                                if "ddgs" not in providers_used:
+                                    providers_used.append("ddgs")
+                                query_results.extend(found)
+                                warnings_list.append(f"{query} page {page}: fell back from SerpApi to DDGS")
+                            except Exception as fallback_exc:
+                                warnings_list.append(redact(f"{query} page {page} DDGS fallback: {type(fallback_exc).__name__}: {fallback_exc}", secrets))
+                        elif provider_for_query == "ddgs" and requested_provider == "auto":
+                            try:
+                                found = search_openverse(session, query, args.max_results, page, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit)
+                                if "openverse" not in providers_used:
+                                    providers_used.append("openverse")
+                                query_results.extend(found)
+                                warnings_list.append(f"{query} page {page}: fell back from DDGS to Openverse")
+                            except Exception as fallback_exc:
+                                warnings_list.append(redact(f"{query} page {page} Openverse fallback: {type(fallback_exc).__name__}: {fallback_exc}", secrets))
+                for candidate in query_results:
+                    candidate.score = score_candidate(candidate, preferred_domains, args.orientation)
+                all_candidates.extend(query_results)
+
 
         candidates = merge_candidates(all_candidates)
         if allowed_domains:
@@ -1220,23 +1310,7 @@ def main() -> int:
             "requested_backend": args.ddgs_backend,
             "actual_sources": ddgs_actual_sources,
             "queries": queries,
-            "search_settings": {
-                "region": args.region,
-                "start_page": args.page,
-                "pages": args.pages,
-                "max_results_per_query_page": args.max_results,
-                "orientation": args.orientation,
-                "image_type": args.image_type,
-                "size": args.size,
-                "color": args.color,
-                "safe_search": args.safe_search,
-                "time_limit": args.time_limit,
-                "license_filter": args.license_filter,
-                "preferred_domains": preferred_domains,
-                "allowed_domains": allowed_domains,
-                "blocked_domains": blocked_domains,
-                "ddgs_backend": args.ddgs_backend,
-            },
+            "search_settings": search_settings,
             "download_settings": download_settings,
             "warnings": warnings_list,
             "rights_notice": "Search filters and metadata are not legal proof of reuse rights. Verify the source page and license before publishing.",
