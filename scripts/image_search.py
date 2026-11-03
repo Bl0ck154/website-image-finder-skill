@@ -163,11 +163,13 @@ def slugify(value: str, max_len: int = 64) -> str:
     return (ascii_slug or "image")[:max_len].rstrip("-")
 
 
-def region_to_google(region: str) -> tuple[str, str]:
+def region_to_google(region: str) -> tuple[str | None, str | None]:
     normalized = region.strip().lower().replace("_", "-")
+    if normalized == "auto":
+        return None, None
     match = re.fullmatch(r"([a-z]{2})-([a-z]{2,3})", normalized)
     if not match:
-        raise SkillError("region must look like lt-lt, ua-uk, or us-en")
+        raise SkillError("region must be auto or look like lt-lt, ua-uk, or us-en")
     return match.group(1), match.group(2)
 
 
@@ -332,13 +334,15 @@ def search_serpapi(
         "engine": "google_images",
         "q": query,
         "api_key": api_key,
-        "gl": gl,
-        "hl": hl,
         "ijn": max(page - 1, 0),
         "safe": "active" if safe_search != "off" else "off",
         "device": "desktop",
         "output": "json",
     }
+    if gl:
+        params["gl"] = gl
+    if hl:
+        params["hl"] = hl
     if orientation_value := serpapi_orientation(orientation):
         params["imgar"] = orientation_value
     if image_type_value:
@@ -394,7 +398,7 @@ def search_ddgs(
 
     kwargs: dict[str, Any] = {
         "query": query,
-        "region": region,
+        "region": "wt-wt" if region == "auto" else region,
         "safesearch": {"active": "on", "moderate": "moderate", "off": "off"}[safe_search],
         "max_results": max_results,
         "page": page,
@@ -669,7 +673,7 @@ def download_next_batch(
     attempts = 0
     retryable = {"found"}
     if retry_failed:
-        retryable.add("failed")
+        retryable.update({"failed", "skipped-small", "skipped-metadata-small"})
 
     for candidate in candidates:
         if len(downloaded) >= count or attempts >= max_attempts:
@@ -936,7 +940,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", "--keep", dest="batch_size", type=int, default=12, help="Candidates in the first review batch; 0 means URLs only")
     parser.add_argument("--max-attempts", type=int, default=30, help="Maximum network download attempts for the first batch")
     parser.add_argument("--download", type=int, default=None, help="Deprecated alias for --max-attempts")
-    parser.add_argument("--region", default="lt-lt", help="Region-language, e.g. lt-lt, ua-uk, us-en")
+    parser.add_argument("--region", default="auto", help="auto (worldwide) or region-language, e.g. lt-lt, ua-uk, us-en")
     parser.add_argument("--min-width", type=int, default=800)
     parser.add_argument("--min-height", type=int, default=500)
     parser.add_argument("--max-mb", type=int, default=12)
@@ -1170,7 +1174,12 @@ def main() -> int:
             print("Warnings:", file=sys.stderr)
             for message in warnings_list:
                 print(f"- {message}", file=sys.stderr)
-        return 0 if candidates else 1
+        if not candidates:
+            return 1
+        if args.batch_size > 0 and not batch_candidates:
+            print("Error: search returned URLs but no usable image was downloaded; check candidate failures in the cache.", file=sys.stderr)
+            return 3
+        return 0
     except SkillError as exc:
         print(f"Error: {redact(str(exc))}", file=sys.stderr)
         return 2

@@ -31,7 +31,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--jpeg-background", default="#ffffff", help="Background used when flattening alpha to JPEG")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--allow-first-frame", action="store_true")
-    parser.add_argument("--no-sidecar", action="store_true", help="Do not write <output>.source.json when using a search cache")
+    parser.add_argument("--no-sidecar", action="store_true", help="Do not write private provenance metadata when using a search cache")
     return parser.parse_args()
 
 
@@ -143,7 +143,13 @@ def main() -> int:
         with Image.open(target) as check:
             check.verify()
         if candidate is not None and manifest_path is not None and not args.no_sidecar:
-            sidecar = Path(str(target) + ".source.json")
+            # Keep source URLs and possible signed image links out of deployed public assets.
+            # The project-local .image-search directory must be gitignored.
+            sidecar = resolve_under_root(
+                Path(".image-search") / "provenance" / (str(target.relative_to(root)) + ".source.json"),
+                root,
+                label="private source metadata",
+            )
             sidecar_payload = {
                 "schema_version": 1,
                 "created_at": datetime.now(timezone.utc).isoformat(),
