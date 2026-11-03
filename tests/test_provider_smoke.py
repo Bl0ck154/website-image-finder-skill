@@ -48,6 +48,33 @@ class SmokeToolTests(unittest.TestCase):
         self.assertIn("optional DDGS dependency is missing", result["reason"])
         self.assertNotIn("token=", str(result))
 
+    def test_transient_provider_failure_has_sanitized_explanation(self):
+        import json
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            def fake_temp(*args, **kwargs):
+                return contextlib.nullcontext(folder)
+            def fake_subprocess(argv, **kwargs):
+                cache = root / ".image-search" / "smoke"
+                cache.mkdir(parents=True, exist_ok=True)
+                (cache / "results-cache.json").write_text(json.dumps({
+                    "warnings": ["openverse temporarily unavailable: skipped remaining requests"],
+                    "summary": {"unique_results": 0, "downloaded_unique": 0},
+                    "metrics": {"download_attempts": 0},
+                }))
+                return mock.Mock(returncode=1, stderr="secret query in remote error")
+            with mock.patch.object(provider_smoke.tempfile, "TemporaryDirectory", side_effect=fake_temp), \
+                 mock.patch.object(provider_smoke.subprocess, "run", side_effect=fake_subprocess), \
+                 mock.patch.object(provider_smoke, "prepared_python", return_value=Path(sys.executable)):
+                result = provider_smoke.run_provider(
+                    "openverse", "a test", 3, 2, 20,
+                    Path(__file__).resolve().parents[1] / "scripts" / "skill.py",
+                )
+        self.assertIn("temporarily unavailable", result["reason"])
+        self.assertNotIn("secret query", str(result))
+
     def test_valid_report_after_mocked_provider_calls(self):
         with mock.patch.object(sys, "argv", [
             "provider_smoke.py", "--live", "--provider", "wikimedia"

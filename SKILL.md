@@ -43,6 +43,7 @@ The first run may install the pinned-compatible packages in `requirements.txt` w
 - Wikimedia Commons: no key; useful for fallback image discovery. It does not provide a reliable provider-side safe-search filter and only supports a subset of search filters. Always review candidates.
 - SerpApi Google Images: only when explicitly requested with `--provider serpapi` and a configured key. Treat this as potentially paid. Default cap: three search requests per run.
 - Use `--no-provider-fallback` to restrict automatic searching to the primary free backend.
+- If a free provider times out, returns 429/5xx or drops a connection, avoid retrying that provider repeatedly in the same run; continue only to compatible free sources. A requested reuse-rights filter must never be silently weakened.
 - Same searches reuse cached provider results for 24 hours by default. Use `--reuse-cache-hours 0` for a fresh query.
 - Use `--batch-size 0` for URLs only. It writes `urls.json` without downloading candidates; `more` can download later if the cache has results.
 - Search results are stored under `.image-search/<run>/`. A completed download batch writes `candidates-XX.json`, `contact-sheet-XX.jpg` and `review-batch-XX.json`. These are private working files. The shortlist uses deterministic metadata, not AI vision.

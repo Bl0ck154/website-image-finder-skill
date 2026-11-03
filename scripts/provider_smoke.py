@@ -93,6 +93,16 @@ def run_provider(
                 data = json.loads(cache.read_text(encoding="utf-8"))
                 summary = data.get("summary") or {}
                 metrics = data.get("metrics") or {}
+                warnings = data.get("warnings") or []
+                if any(
+                    isinstance(warning, str)
+                    and warning.startswith(f"{provider} temporarily unavailable:")
+                    for warning in warnings
+                ):
+                    # The private cache holds detailed third-party errors and
+                    # source URLs. The public smoke report uses a fixed,
+                    # privacy-safe category instead.
+                    outcome["reason"] = "provider temporarily unavailable (timeout, HTTP 429/5xx or connection failure)"
                 outcome["unique_results"] = summary.get("unique_results", 0)
                 outcome["downloaded"] = summary.get("downloaded_unique", 0)
                 outcome["download_attempts"] = metrics.get("download_attempts", 0)
@@ -102,7 +112,7 @@ def run_provider(
                 if provider == "ddgs" and ("Missing ddgs" in proc.stderr or
                                            "No module named 'ddgs'" in proc.stderr):
                     outcome["reason"] = "optional DDGS dependency is missing; run python scripts/skill.py setup"
-                else:
+                elif "reason" not in outcome:
                     outcome["reason"] = f"search exit code {proc.returncode}"
             elif not cache.is_file():
                 outcome["reason"] = "search did not produce a cache"

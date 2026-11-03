@@ -30,7 +30,7 @@ from search_providers import (
     region_to_google, serpapi_license, ddgs_license, serpapi_orientation,
     serpapi_size, serpapi_time_limit, serpapi_type, ddgs_type, create_session,
     search_serpapi, search_ddgs, search_openverse, search_wikimedia,
-    provider_order,
+    provider_order, is_transient_search_failure,
 )
 from contact_sheet import checkerboard, prepare_preview, plan_justified_rows, create_contact_sheet
 from search_cache import cache_summary, write_cache, find_reusable_cache
@@ -618,9 +618,12 @@ def main() -> int:
             return batch.candidates
 
         attempted_provider_keys: set[tuple[str, int, str]] = set()
+        unavailable_providers: set[str] = set()
 
         def fetch_from_provider(query: str, page: int, provider: str) -> list[Candidate]:
             """Run and account for one provider, preserving free-only policy."""
+            if provider in unavailable_providers:
+                return []
             attempted_provider_keys.add((query, page, provider))
             provider_calls[provider] = provider_calls.get(provider, 0) + 1
             try:
@@ -663,6 +666,12 @@ def main() -> int:
                     f"{query} page {page} via {provider}: {type(exc).__name__}: {exc}",
                     secrets,
                 ))
+                if is_transient_search_failure(exc):
+                    unavailable_providers.add(provider)
+                    warnings_list.append(
+                        f"{provider} temporarily unavailable: skipped remaining requests "
+                        "to this provider in this run; retry later"
+                    )
                 return []
 
         if reused_payload is not None:

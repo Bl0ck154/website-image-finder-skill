@@ -19,11 +19,40 @@ from candidate_model import (
 from common import SkillError, canonical_url, domain_of
 from safe_transport import mount_pinned_transport
 
-USER_AGENT = "WebsiteImageFinder/0.5.2 (https://github.com/Bl0ck154/website-image-finder-skill)"
+USER_AGENT = "WebsiteImageFinder/0.5.3 (https://github.com/Bl0ck154/website-image-finder-skill)"
 SERPAPI_ENDPOINT = "https://serpapi.com/search.json"
 OPENVERSE_ENDPOINT = "https://api.openverse.org/v1/images/"
 WIKIMEDIA_ENDPOINT = "https://commons.wikimedia.org/w/api.php"
 DDGS_SOURCE_NAMES = {"bing": "Bing", "duckduckgo": "DuckDuckGo"}
+
+
+class ProviderTemporarilyUnavailable(SkillError):
+    """The provider should not receive more search requests in this run."""
+
+
+def check_search_response(response: Any, provider: str) -> None:
+    """Classify HTTP failures before JSON decoding (429 often returns HTML)."""
+    status = response.status_code
+    if status == 429:
+        retry_after = str(getattr(response, "headers", {}).get("Retry-After") or "")
+        notice = f"{provider} HTTP 429 (rate limited)"
+        if retry_after.isdecimal() and len(retry_after) <= 7:
+            notice += f"; Retry-After: {retry_after} seconds"
+        raise ProviderTemporarilyUnavailable(notice)
+    if status >= 500:
+        raise ProviderTemporarilyUnavailable(f"{provider} HTTP {status} (server unavailable)")
+    if status >= 400:
+        raise SkillError(f"{provider} HTTP {status}: search unavailable")
+
+
+def is_transient_search_failure(exc: Exception) -> bool:
+    if isinstance(exc, ProviderTemporarilyUnavailable):
+        return True
+    try:
+        import requests
+        return isinstance(exc, (requests.exceptions.Timeout, requests.exceptions.ConnectionError))
+    except ImportError:
+        return False
 
 def installed_ddgs_version() -> str | None:
     try:
@@ -318,13 +347,12 @@ def search_openverse(
     if value := license_types[license_filter]:
         params["license_type"] = value
 
-    response = session.get(OPENVERSE_ENDPOINT, params=params, timeout=(6, 15))
+    response = session.get(OPENVERSE_ENDPOINT, params=params, timeout=(5, 12))
+    check_search_response(response, "Openverse")
     try:
         payload = response.json()
     except ValueError as exc:
         raise SkillError(f"Openverse HTTP {response.status_code}: non-JSON response") from exc
-    if response.status_code >= 400:
-        raise SkillError(f"Openverse HTTP {response.status_code}: search unavailable")
     if not isinstance(payload, dict) or not isinstance(payload.get("results"), list):
         raise SkillError("Openverse returned unexpected search payload")
     result: list[Candidate] = []
@@ -362,12 +390,13 @@ def search_wikimedia(
         "prop": "imageinfo",
         "iiprop": "url|size|mime|extmetadata",
     }
-    response = session.get(WIKIMEDIA_ENDPOINT, params=params, timeout=(6, 18))
+    response = session.get(WIKIMEDIA_ENDPOINT, params=params, timeout=(5, 15))
+    check_search_response(response, "Wikimedia")
     try:
         payload = response.json()
     except ValueError as exc:
         raise SkillError(f"Wikimedia HTTP {response.status_code}: non-JSON response") from exc
-    if response.status_code >= 400 or not isinstance(payload, dict) or payload.get("error"):
+    if not isinstance(payload, dict) or payload.get("error"):
         raise SkillError(f"Wikimedia HTTP {response.status_code}: search unavailable")
     pages = payload.get("query", {}).get("pages", [])
     if not isinstance(pages, list):

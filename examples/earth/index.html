@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A small, static website example using a locally optimized NASA Blue Marble image and a visible source credit.">
+  <title>One planet · Website Image Finder example</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="masthead">
+      <a class="project" href="../../README.md" aria-label="Website Image Finder project README">
+        <span class="mark" aria-hidden="true"></span>
+        <span>Website Image Finder</span>
+      </a>
+      <span class="eyebrow">Real image example</span>
+    </header>
+
+    <section class="intro" aria-labelledby="page-title">
+      <p class="kicker">Earth · 2002</p>
+      <h1 id="page-title">One planet. A closer look.</h1>
+      <p class="lead">A simple editorial page built around a real public-domain satellite composite. The image is hosted locally as an optimized WebP, with its original source and credits intact.</p>
+    </section>
+
+    <figure class="image-card">
+      <img
+        src="assets/blue-marble.webp"
+        alt="NASA Blue Marble 2002 satellite composite showing Earth's continents, oceans, and Antarctica on a flat world map."
+        width="1280"
+        height="640"
+        fetchpriority="high">
+      <figcaption>
+        <div>
+          <strong>The Blue Marble, 2002</strong>
+          <span>1280 × 640 · locally optimized WebP</span>
+        </div>
+        <a href="https://commons.wikimedia.org/wiki/File:Blue_Marble_2002.jpg">View original and licensing</a>
+      </figcaption>
+    </figure>
+
+    <footer class="footer">
+      <div>
+        <p class="credit-title">Image credit</p>
+        <p>NASA Goddard Space Flight Center. Image by Reto Stöckli; enhancements by Robert Simmon. Source: <a href="https://science.nasa.gov/earth/earth-observatory/the-blue-marble-true-color-global-imagery-at-1km-resolution/">NASA Earth Observatory</a>.</p>
+      </div>
+      <p class="usage">This independent example is not affiliated with or endorsed by NASA. Check the <a href="https://www.nasa.gov/nasa-brand-center/images-and-media/">NASA media usage guidelines</a> before reusing the imagery.</p>
+    </footer>
+  </main>
+</body>
+</html>

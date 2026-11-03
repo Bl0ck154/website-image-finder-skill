@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.3 (2026-11-03)
+
+- Handle Openverse/Wikimedia HTTP 429 and 5xx responses before JSON parsing,
+  including non-JSON error pages and a safe Retry-After hint for 429.
+- Avoid repeated calls to a temporarily unavailable provider in the same run;
+  continue with compatible free fallbacks without bypassing license filters.
+- Shorten Openverse/Wikimedia connect/read timeouts to reduce time lost on
+  stalled providers, keeping network and HTTP 429/5xx handling conservative.
+- Add regression tests for circuit breakers, rate limits, licensing policy,
+  and HTML-based provider failures.
+- Add a real, locally optimized NASA Blue Marble website example, with
+  source provenance, accurate credit, image reuse notices and offline tests.
+
 ## 0.5.2 (2026-11-03)
 
 - Extract provider adapters, candidate normalization, private search caches and

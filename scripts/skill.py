@@ -10,7 +10,7 @@ from pathlib import Path
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = SKILL_DIR / "scripts"
-VERSION = "0.5.2"
+VERSION = "0.5.3"
 COMMANDS = {
     "search": SCRIPTS_DIR / "image_search.py",
     "more": SCRIPTS_DIR / "download_more.py",
