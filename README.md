@@ -52,6 +52,12 @@ On Windows use `py -3` instead of `python3`. You can use `python3 <SKILL_DIR>/sc
 
 **If Python is unavailable or the agent cannot install packages:** the skill instructions allow a limited fallback through the agent's own web/image search tools, if provided. That fallback cannot promise contact sheets, local optimization, or metadata files.
 
+## Asset presets
+
+Use `--asset-type hero|photo|logo|icon|illustration` to choose more appropriate minimum dimensions. The existing photo defaults remain 800×500; logo permits 100×60 and icon 64×64. Explicit `--min-width`, `--min-height` and `--orientation` override the preset.
+
+When automatic free search returns image URLs but none can be downloaded, the skill tries another available free provider using its remaining download-attempt budget. License-filtered searches never silently weaken usage-rights constraints and SerpApi remains explicitly opt-in.
+
 ## How free image search works
 
 | Provider | API key | Default selection | Trade-off |
