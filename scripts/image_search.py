@@ -46,6 +46,13 @@ OPENVERSE_ENDPOINT = "https://api.openverse.org/v1/images/"
 WIKIMEDIA_ENDPOINT = "https://commons.wikimedia.org/w/api.php"
 MAX_REDIRECTS = 5
 CACHE_FILENAME = "results-cache.json"
+ASSET_PRESETS = {
+    "photo": (800, 500, "any"),
+    "hero": (1200, 600, "wide"),
+    "logo": (100, 60, "any"),
+    "icon": (64, 64, "square"),
+    "illustration": (400, 300, "any"),
+}
 DDGS_SOURCE_NAMES = {"bing": "Bing", "duckduckgo": "DuckDuckGo"}
 
 
@@ -1176,11 +1183,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-attempts", type=int, default=30, help="Maximum network download attempts for the first batch")
     parser.add_argument("--download", type=int, default=None, help="Deprecated alias for --max-attempts")
     parser.add_argument("--region", default="auto", help="auto (worldwide) or region-language, e.g. lt-lt, ua-uk, us-en")
-    parser.add_argument("--min-width", type=int, default=800)
-    parser.add_argument("--min-height", type=int, default=500)
+    parser.add_argument("--asset-type", choices=sorted(ASSET_PRESETS), default="photo",
+                        help="Presets for photo, hero, logo, icon or illustration; explicit sizes override")
+    parser.add_argument("--min-width", type=int, default=None)
+    parser.add_argument("--min-height", type=int, default=None)
     parser.add_argument("--max-mb", type=int, default=12)
     parser.add_argument("--max-pixels", type=int, default=30_000_000)
-    parser.add_argument("--orientation", choices=["any", "square", "tall", "wide"], default="any")
+    parser.add_argument("--orientation", choices=["any", "square", "tall", "wide"], default=None)
     parser.add_argument("--image-type", choices=["any", "photo", "clipart", "lineart", "transparent", "animated"], default="any")
     parser.add_argument("--size", choices=["any", "small", "medium", "large", "wallpaper"], default="any")
     parser.add_argument("--color", default="any", help="any, bw, red, orange, yellow, green, teal, blue, purple, pink, white, gray, black, brown")
@@ -1198,6 +1207,13 @@ def parse_args() -> argparse.Namespace:
 def validate_args(args: argparse.Namespace) -> None:
     if args.download is not None:
         args.max_attempts = args.download
+    width, height, shape = ASSET_PRESETS[args.asset_type]
+    if args.min_width is None:
+        args.min_width = width
+    if args.min_height is None:
+        args.min_height = height
+    if args.orientation is None:
+        args.orientation = shape
     if not args.query.strip():
         raise SkillError("query cannot be empty")
     all_queries = [args.query, *args.extra_query]
@@ -1270,6 +1286,7 @@ def main() -> int:
 
         search_settings = {
             "region": args.region,
+            "asset_type": args.asset_type,
             "start_page": args.page,
             "pages": args.pages,
             "max_results_per_query_page": args.max_results,
@@ -1285,7 +1302,7 @@ def main() -> int:
             "blocked_domains": blocked_domains,
             "ddgs_backend": args.ddgs_backend,
             "no_provider_fallback": args.no_provider_fallback,
-            "provider_policy": "free-first-v1",
+            "provider_policy": "free-first-v2",
         }
         reused_payload = find_reusable_cache(
             root, queries, search_settings, requested_provider, args.reuse_cache_hours, out_dir
