@@ -10,6 +10,8 @@
 - Refresh compatible Requests, DDGS and GitHub Actions versions.
 - Keep Pillow below 13 while supporting Python 3.10 and ignore incompatible
   Dependabot major-version upgrades.
+- Run macOS CI on the official Intel image while the ARM macOS-latest
+  hosted-runner queue is experiencing capacity issues.
 - Add architecture documentation and expand regression coverage.
 
 ## 0.5.1 (2026-11-03)
