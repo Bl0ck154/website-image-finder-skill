@@ -66,6 +66,16 @@ def resolve_under_root(value: str | Path, root: Path, *, label: str = "path") ->
     return ensure_within_root(path, root, label=label)
 
 
+def prepare_private_workdir(root: Path) -> Path:
+    """Keep cached third-party URLs and optional Python dependencies out of git adds."""
+    folder = ensure_within_root(root / ".image-search", root, label="private image-search directory")
+    folder.mkdir(parents=True, exist_ok=True)
+    ignore = folder / ".gitignore"
+    if not ignore.exists():
+        atomic_write_text(ignore, "*\\n!.gitignore\\n".replace("\\\\n", "\\n"))
+    return folder
+
+
 def normalize_domain(value: str) -> str:
     raw = value.strip().lower().rstrip(".")
     if not raw:

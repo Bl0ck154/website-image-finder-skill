@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from common import SkillError, atomic_write_json, redact, resolve_under_root
+from common import SkillError, atomic_write_json, redact, resolve_under_root, prepare_private_workdir
 from image_search import (
     CACHE_FILENAME,
     cache_summary,
@@ -56,6 +56,7 @@ def main() -> int:
         root = Path(args.root).resolve()
         if not root.is_dir():
             raise SkillError(f"project root does not exist: {root}")
+        prepare_private_workdir(root)
         run_dir = resolve_under_root(args.run, root, label="search run directory")
         if not run_dir.is_dir():
             raise SkillError(f"search run directory does not exist: {run_dir}")

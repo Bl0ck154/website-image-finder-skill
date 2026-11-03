@@ -34,6 +34,7 @@ from common import (
     unicode_words,
     validate_public_url,
     validate_remote_url_syntax,
+    prepare_private_workdir,
 )
 
 USER_AGENT = "WebsiteImageFinder/0.4.0 (https://github.com/Bl0ck154/website-image-finder-skill)"
@@ -1234,6 +1235,7 @@ def main() -> int:
         root = Path(args.root).resolve()
         if not root.is_dir():
             raise SkillError(f"project root does not exist: {root}")
+        prepare_private_workdir(root)
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         default_out = Path(".image-search") / f"{slugify(args.query)}-{timestamp}"
         out_dir = resolve_under_root(args.out if args.out else default_out, root, label="output directory")
