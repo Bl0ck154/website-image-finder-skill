@@ -41,3 +41,11 @@ jobs:
         run: |
           python scripts/skill.py --version
           python scripts/skill.py check
+      - name: Test first-use dependency bootstrap
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'
+        env:
+          WEBSITE_IMAGE_FINDER_CACHE_DIR: ${{ runner.temp }}/image-finder-bootstrap
+        run: |
+          python scripts/skill.py setup
+          python scripts/skill.py check
+
