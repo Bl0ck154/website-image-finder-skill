@@ -36,6 +36,7 @@ from common import (
 
 USER_AGENT = "WebsiteImageFinder/0.2.1 (+Agent Skill; image asset research)"
 SERPAPI_ENDPOINT = "https://serpapi.com/search.json"
+OPENVERSE_ENDPOINT = "https://api.openverse.org/v1/images/"
 MAX_REDIRECTS = 5
 CACHE_FILENAME = "results-cache.json"
 DDGS_SOURCE_NAMES = {"bing": "Bing", "duckduckgo": "DuckDuckGo"}
@@ -186,6 +187,8 @@ def serpapi_license(value: str) -> str | None:
 
 
 def ddgs_license(value: str) -> str | None:
+    if value == "creative-commons":
+        raise SkillError("DDGS cannot guarantee a Creative Commons license filter; use --provider openverse")
     if value == "commercial-other":
         raise SkillError("DDGS has no equivalent for the SerpApi 'commercial-other' license filter")
     return {
@@ -194,7 +197,7 @@ def ddgs_license(value: str) -> str | None:
         "commercial": "ShareCommercially",
         "modify": "Modify",
         "commercial-modify": "ModifyCommercially",
-        "creative-commons": "any",
+        "creative-commons": None,
         "commercial-other": None,
     }[value]
 
@@ -284,6 +287,33 @@ def make_candidate(provider: str, query: str, position: int, item: dict[str, Any
         source_label=str(item.get("source") or "").strip(),
         reported_width=int_or_none(item.get("width")),
         reported_height=int_or_none(item.get("height")),
+    )
+
+
+def make_openverse_candidate(query: str, position: int, item: dict[str, Any]) -> Candidate | None:
+    """Normalize Openverse image results without treating licenses as verified reuse permission."""
+    try:
+        image_url = safe_result_url(item.get("url"), required=True)
+    except SkillError:
+        return None
+    page_url = safe_result_url(item.get("foreign_landing_url") or item.get("detail_url"))
+    key = hashlib.sha1(canonical_url(image_url).encode("utf-8", "replace")).hexdigest()[:12]
+    return Candidate(
+        id=f"img-{key}",
+        rank=position,
+        provider="openverse",
+        provider_position=position,
+        queries=[query],
+        title=str(item.get("title") or "").strip(),
+        image_url=image_url,
+        thumbnail_url=safe_result_url(item.get("thumbnail")),
+        source_page_url=page_url,
+        source_domain=domain_of(page_url),
+        source_label=str(item.get("provider") or item.get("source") or "").strip(),
+        reported_width=int_or_none(item.get("width")),
+        reported_height=int_or_none(item.get("height")),
+        license_url=str(item.get("license_url") or "").strip() or None,
+        license_tag=str(item.get("license") or "").strip() or None,
     )
 
 
@@ -431,6 +461,72 @@ def search_ddgs(
         requested_backend=backend,
         actual_sources=actual_sources,
     )
+
+
+def search_openverse(
+    session: Any,
+    query: str,
+    max_results: int,
+    page: int,
+    orientation: str,
+    image_type: str,
+    license_filter: str,
+    safe_search: str,
+    size: str,
+    color: str,
+    time_limit: str,
+) -> list[Candidate]:
+    """Search Openverse public media index without an API key.
+
+    Openverse results carry license metadata, but users must still verify rights.
+    Unsupported filters fail explicitly instead of silently being ignored.
+    """
+    if image_type != "any":
+        raise SkillError("Openverse does not support --image-type; use --image-type any")
+    if color != "any" or time_limit != "any":
+        raise SkillError("Openverse does not support --color or --time-limit filters")
+    if size not in {"any", "small", "medium", "large"}:
+        raise SkillError("Openverse supports --size any|small|medium|large")
+    if license_filter in {"share", "commercial-other"}:
+        raise SkillError(f"Openverse does not support --license {license_filter}")
+
+    params: dict[str, Any] = {
+        "q": query,
+        "page": page,
+        "page_size": min(max_results, 100),
+        "mature": "true" if safe_search == "off" else "false",
+    }
+    if orientation != "any":
+        params["aspect_ratio"] = {"wide": "wide", "tall": "tall", "square": "square"}[orientation]
+    if size != "any":
+        params["size"] = size
+    license_types = {
+        "any": None,
+        "creative-commons": "all-cc",
+        "commercial": "commercial",
+        "modify": "modification",
+        "commercial-modify": "commercial,modification",
+    }
+    if value := license_types[license_filter]:
+        params["license_type"] = value
+
+    response = session.get(OPENVERSE_ENDPOINT, params=params, timeout=(10, 35))
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise SkillError(f"Openverse HTTP {response.status_code}: non-JSON response") from exc
+    if response.status_code >= 400:
+        raise SkillError(f"Openverse HTTP {response.status_code}: search unavailable")
+    if not isinstance(payload, dict) or not isinstance(payload.get("results"), list):
+        raise SkillError("Openverse returned unexpected search payload")
+    result: list[Candidate] = []
+    for position, item in enumerate(payload["results"][:max_results], 1):
+        if not isinstance(item, dict):
+            continue
+        candidate = make_openverse_candidate(query, position, item)
+        if candidate:
+            result.append(candidate)
+    return result
 
 
 def score_candidate(candidate: Candidate, preferred_domains: list[str], orientation: str) -> float:
@@ -928,7 +1024,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("query", help="Primary image-search query")
     parser.add_argument("--extra-query", action="append", default=[], help="Additional query; repeatable")
-    parser.add_argument("--provider", choices=["auto", "serpapi", "ddgs"], default="auto")
+    parser.add_argument("--provider", choices=["auto", "serpapi", "ddgs", "openverse"], default="auto")
     parser.add_argument("--no-provider-fallback", action="store_true", help="Do not fall back from SerpApi to DDGS")
     parser.add_argument("--ddgs-backend", choices=["auto", "bing", "duckduckgo"], default="auto")
     parser.add_argument("--root", default=".", help="Project root; output must stay inside it")
@@ -1024,7 +1120,7 @@ def main() -> int:
         requested_provider = args.provider
         primary_provider = requested_provider
         if primary_provider == "auto":
-            primary_provider = "serpapi" if api_key else "ddgs"
+            primary_provider = "openverse" if args.license_filter == "creative-commons" else ("serpapi" if api_key else "ddgs")
         if primary_provider == "serpapi" and not api_key:
             if requested_provider == "serpapi":
                 raise SkillError("SERPAPI_API_KEY or SERPAPI_KEY is required for --provider serpapi")
@@ -1051,8 +1147,10 @@ def main() -> int:
                 try:
                     if provider_for_query == "serpapi":
                         found = search_serpapi(session, query, api_key, args.max_results, args.region, page, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit)
-                    else:
+                    elif provider_for_query == "ddgs":
                         found = record_ddgs_batch(search_ddgs(query, args.max_results, args.region, page, args.ddgs_backend, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit))
+                    else:
+                        found = search_openverse(session, query, args.max_results, page, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit)
                     if provider_for_query not in providers_used:
                         providers_used.append(provider_for_query)
                     if provider_for_query == "serpapi" and not found and not args.no_provider_fallback and requested_provider == "auto":
@@ -1061,6 +1159,12 @@ def main() -> int:
                             providers_used.append("ddgs")
                         query_results.extend(fallback_found)
                         warnings_list.append(f"{query} page {page}: SerpApi returned no images; used DDGS fallback")
+                    elif provider_for_query == "ddgs" and not found and requested_provider == "auto":
+                        fallback_found = search_openverse(session, query, args.max_results, page, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit)
+                        if "openverse" not in providers_used:
+                            providers_used.append("openverse")
+                        query_results.extend(fallback_found)
+                        warnings_list.append(f"{query} page {page}: DDGS returned no images; used Openverse fallback")
                     else:
                         query_results.extend(found)
                 except Exception as exc:
@@ -1075,6 +1179,15 @@ def main() -> int:
                             warnings_list.append(f"{query} page {page}: fell back from SerpApi to DDGS")
                         except Exception as fallback_exc:
                             warnings_list.append(redact(f"{query} page {page} DDGS fallback: {type(fallback_exc).__name__}: {fallback_exc}", secrets))
+                    elif provider_for_query == "ddgs" and requested_provider == "auto":
+                        try:
+                            found = search_openverse(session, query, args.max_results, page, args.orientation, args.image_type, args.license_filter, args.safe_search, args.size, args.color, args.time_limit)
+                            if "openverse" not in providers_used:
+                                providers_used.append("openverse")
+                            query_results.extend(found)
+                            warnings_list.append(f"{query} page {page}: fell back from DDGS to Openverse")
+                        except Exception as fallback_exc:
+                            warnings_list.append(redact(f"{query} page {page} Openverse fallback: {type(fallback_exc).__name__}: {fallback_exc}", secrets))
             for candidate in query_results:
                 candidate.score = score_candidate(candidate, preferred_domains, args.orientation)
             all_candidates.extend(query_results)
