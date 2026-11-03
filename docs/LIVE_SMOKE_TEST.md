@@ -66,3 +66,34 @@ These are single observations, not average latencies or a provider ranking.
 Run `python3 scripts/skill.py setup` before the smoke command when optional
 DDGS dependencies are not installed. The provider can also be unavailable,
 rate-limited or refuse image downloads.
+
+
+## v0.5.3: provider failure handling
+
+Openverse and Wikimedia now classify HTTP 429/5xx before attempting JSON
+parsing. If a provider times out, drops the connection, rate-limits, or returns
+an HTTP 5xx, that provider is skipped for subsequent pages and queries in the
+same search run. This avoids hammering a failing free endpoint. The normal
+free fallback continues where allowed, and requests constrained by an explicit
+license remain restricted to compatible providers.
+
+Timeouts are per connection and read, not a guaranteed wall-clock deadline for
+an entire multi-provider run. The manual bounded provider-smoke command remains
+available for end-to-end diagnostics. Openverse responses can still be slow or
+fail due to the external service; this change prevents repeated requests after
+an observed transient failure.
+
+
+### Verified live free-provider recovery, v0.5.3
+
+On 2026-11-03 an automatic search for "blue planet earth" was tested
+with five results per provider and a maximum of four download attempts.
+The Openverse API timed out on the first request and was marked
+temporarily unavailable for the rest of that run. The search continued
+to Wikimedia Commons, found five candidates, and downloaded one in
+a single image request. The cache recorded one Openverse provider call
+and one Wikimedia provider call; no paid SerpApi request occurred.
+
+This verifies a recovery pathway during that test. It does **not**
+prove that Openverse is generally unavailable or that Wikimedia always
+succeeds. External provider behavior changes independently of the skill.

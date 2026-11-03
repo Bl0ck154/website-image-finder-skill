@@ -1,0 +1,35 @@
+:root {
+  color-scheme: dark;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: #0c111c;
+  color: #e9edf5;
+  font-synthesis: none;
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+a { color: #bdd9ff; text-underline-offset: 3px; }
+a:hover, a:focus-visible { color: #fff; }
+.shell { max-width: 1120px; margin: 0 auto; padding: 28px 30px 56px; }
+.masthead { display: flex; align-items: center; justify-content: space-between; gap: 20px; color: #aab7cb; font-size: 13px; }
+.project { display: flex; align-items: center; gap: 10px; font-weight: 650; letter-spacing: -.01em; color: #e9edf5; text-decoration: none; }
+.mark { width: 15px; height: 15px; background: #83b9ed; border-radius: 50%; box-shadow: inset -5px -3px 0 #3b729d; }
+.eyebrow { text-align: right; }
+.intro { max-width: 720px; padding: clamp(62px, 9vw, 116px) 0 38px; }
+.kicker { margin: 0 0 16px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .22em; color: #8cb9e8; }
+h1 { font-size: clamp(38px, 6vw, 72px); letter-spacing: -.055em; line-height: 1.05; margin: 0; font-weight: 640; }
+.lead { color: #aab7cb; font-size: clamp(15px, 2vw, 18px); line-height: 1.65; max-width: 630px; margin: 24px 0 0; }
+.image-card { margin: 0; overflow: hidden; border: 1px solid #273246; border-radius: 12px; background: #090d20; }
+.image-card img { display: block; width: 100%; height: auto; aspect-ratio: 2 / 1; object-fit: cover; }
+figcaption { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 20px 24px; color: #aab7cb; font-size: 13px; }
+figcaption strong { display: block; color: #f1f4f9; margin-bottom: 6px; }
+figcaption span { display: block; }
+.footer { margin-top: 42px; padding-top: 26px; border-top: 1px solid #273246; display: grid; grid-template-columns: 1.5fr 1fr; gap: 40px; color: #aab7cb; font-size: 13px; line-height: 1.7; }
+.footer p { margin: 0; }
+.credit-title { color: #e7edf6; font-weight: 650; margin-bottom: 8px !important; }
+.usage { align-self: end; }
+@media (max-width: 700px) {
+  .shell { padding: 22px 16px 40px; }
+  .intro { padding: 72px 0 30px; }
+  figcaption { flex-direction: column; align-items: flex-start; padding: 18px; }
+  .footer { grid-template-columns: 1fr; gap: 18px; }
+}

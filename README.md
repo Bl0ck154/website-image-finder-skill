@@ -159,6 +159,21 @@ rate limits are not deterministic product failures. See
 [Architecture](docs/ARCHITECTURE.md) and
 [Live smoke observations](docs/LIVE_SMOKE_TEST.md).
 
+## A real image in a working page
+
+The [small Earth example](examples/earth/) is a complete static page with a
+**real NASA Blue Marble image**, saved as a local 1280×640 WebP with the skill's
+own finalizer. The page includes accessible alt text and visible image credit.
+
+![NASA Blue Marble 2002 — an actual locally optimized image](examples/earth/assets/blue-marble.webp)
+
+This image is identified as public domain in the United States on its
+[Wikimedia Commons file page](https://commons.wikimedia.org/wiki/File:Blue_Marble_2002.jpg).
+NASA's [media guidelines](https://www.nasa.gov/nasa-brand-center/images-and-media/)
+still apply, including source credit and no implied endorsement. The demo
+[documents the original file, SHA-256 and conversion command](examples/earth/README.md).
+It illustrates a real image in an actual website, not a search-provider benchmark.
+
 ## Why use it instead of an agent's ordinary image search?
 
 A coding agent with web search can already find image URLs. This skill provides a repeatable workflow for downloading candidates, rejecting broken or duplicate files, inspecting a contact sheet, resuming results without a new provider search, exporting optimized website assets and keeping source metadata in the project. The new shortlist helps prioritize manual review. **You still need the agent or a person to judge visual fit and verify reuse rights.**
