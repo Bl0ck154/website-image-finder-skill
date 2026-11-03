@@ -318,7 +318,7 @@ def search_openverse(
     if value := license_types[license_filter]:
         params["license_type"] = value
 
-    response = session.get(OPENVERSE_ENDPOINT, params=params, timeout=(10, 35))
+    response = session.get(OPENVERSE_ENDPOINT, params=params, timeout=(6, 15))
     try:
         payload = response.json()
     except ValueError as exc:
@@ -362,7 +362,7 @@ def search_wikimedia(
         "prop": "imageinfo",
         "iiprop": "url|size|mime|extmetadata",
     }
-    response = session.get(WIKIMEDIA_ENDPOINT, params=params, timeout=(10, 35))
+    response = session.get(WIKIMEDIA_ENDPOINT, params=params, timeout=(6, 18))
     try:
         payload = response.json()
     except ValueError as exc:

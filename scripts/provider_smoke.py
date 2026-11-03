@@ -16,6 +16,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from skill import prepared_python
+
 FREE_PROVIDERS = ("wikimedia", "openverse", "ddgs")
 
 
@@ -58,8 +60,18 @@ def run_provider(
     with tempfile.TemporaryDirectory(prefix="website-image-finder-smoke-") as dirname:
         root = Path(dirname)
         run = root / ".image-search" / "smoke"
+        runner_python = prepared_python(
+            ["search", "--root", str(root)], allow_install=False
+        )
+        if runner_python is None:
+            outcome["reason"] = "Python image dependencies missing; run python scripts/skill.py setup"
+            outcome["elapsed_seconds"] = round(time.monotonic() - measured, 3)
+            return outcome
+        # Run each command directly with the selected Python environment.
+        # The timeout can then terminate the actual network request process,
+        # instead of just the parent launcher and leaving a child downloading.
         args = [
-            sys.executable, str(launcher), "search", query,
+            str(runner_python), str(launcher.with_name("image_search.py")), query,
             "--provider", provider, "--root", str(root),
             "--out", ".image-search/smoke",
             "--batch-size", "1", "--max-results", str(max_results),
@@ -103,7 +115,8 @@ def run_provider(
                     outcome["reason"] = "no downloaded candidates"
                 else:
                     final = subprocess.run(
-                        [sys.executable, str(launcher), "finalize", "--root", str(root),
+                        [str(runner_python), str(launcher.with_name("finalize_image.py")),
+                         "--root", str(root),
                          "--cache", str(cache), "--candidate", str(selected["rank"]),
                          "--output", "public/images/smoke.webp"],
                         capture_output=True, text=True, timeout=20, env=env,
