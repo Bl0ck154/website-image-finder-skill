@@ -114,6 +114,14 @@ class ProviderRecoveryTests(unittest.TestCase):
             self.assertEqual(cache["metrics"]["download_attempts"], 3)
             self.assertIn("openverse", cache["providers_used"])
 
+    def test_run_outputs_must_stay_private(self):
+        with tempfile.TemporaryDirectory() as root:
+            arguments = ["image_search.py", "trees", "--root", root,
+                         "--out", "public/images/cache"]
+            with mock.patch.object(sys, "argv", arguments), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(image_search.main(), 2)
+            self.assertFalse((Path(root) / "public/images/cache").exists())
+
     def test_explicit_and_license_filtered_search_remain_restricted(self):
         self.assertEqual(image_search.provider_order("openverse", "any", False), ["openverse"])
         self.assertEqual(image_search.provider_order("auto", "commercial", False), ["openverse"])
@@ -177,7 +185,7 @@ class PreserveOriginalTests(unittest.TestCase):
             cache.write_text(json.dumps({"results": [candidate]}))
             args = mock.Mock(input=None, cache=str(cache), candidate="1")
             source, _, _ = finalize_image.resolve_source(args, root)
-            self.assertEqual(source, cache_dir / "originals" / "image.original")
+            self.assertEqual(source.resolve(), (cache_dir / "originals" / "image.original").resolve())
             with Image.open(source) as image:
                 self.assertEqual(image.size, (500, 300))
             candidate["original_file"] = "../../outside"
