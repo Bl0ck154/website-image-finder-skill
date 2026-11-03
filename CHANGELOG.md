@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0
+
+- Never select paid SerpApi in automatic search mode, even when an API key exists; explicit `--provider serpapi` remains supported.
+- Add Wikimedia Commons as a third no-key image source, alongside DDGS and Openverse.
+- Automatically prepare isolated Python dependencies on the first image command when needed; opt out with `WEBSITE_IMAGE_FINDER_AUTO_SETUP=0`.
+- Recognize managed Python environments in the `check` command and preserve the manual `setup` option.
+- Reuse matching search results for 24 hours by default; opt out with `--reuse-cache-hours 0`.
+- Strengthen offline tests for paid-provider isolation, Wikimedia metadata, automatic setup and portability.
+- Add local Git ignore rules to protect private image caches and optional project-local dependencies by default.
+- Update onboarding, compatibility notes and the skill prompt for a free-first experience.
+
 ## 0.3.0
 
 - Added Openverse search with source-license metadata and a no-key automatic fallback.

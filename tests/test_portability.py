@@ -163,7 +163,7 @@ class ProviderTests(unittest.TestCase):
              mock.patch.object(image_search, "create_session") as client, \
              mock.patch.object(sys, "argv", [
                  "image_search.py", "office", "--extra-query", "garden",
-                 "--root", root, "--batch-size", "0", "--pages", "3",
+                 "--root", root, "--provider", "serpapi", "--batch-size", "0", "--pages", "3",
              ]), contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(image_search.main(), 2)
             client.assert_not_called()
@@ -180,6 +180,65 @@ class ProviderTests(unittest.TestCase):
              ]), contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(image_search.main(), 1)
             fallback.assert_not_called()
+
+
+    def test_paid_provider_requires_explicit_selection(self):
+        self.assertEqual(image_search.provider_order("auto", "any", False, ddgs_available=True),
+                         ["ddgs", "openverse", "wikimedia"])
+        self.assertEqual(image_search.provider_order("auto", "any", False, ddgs_available=False),
+                         ["openverse", "wikimedia"])
+        self.assertEqual(image_search.provider_order("auto", "any", True, ddgs_available=True),
+                         ["ddgs"])
+        self.assertEqual(image_search.provider_order("serpapi", "any", False), ["serpapi"])
+        self.assertEqual(image_search.provider_order("auto", "commercial-modify", False),
+                         ["openverse"])
+
+    def test_existing_serpapi_key_does_not_trigger_paid_search(self):
+        candidate = image_search.make_openverse_candidate("office", 1, result())
+        with tempfile.TemporaryDirectory() as root, \
+             mock.patch.dict("os.environ", {"SERPAPI_API_KEY": "fake-paid-key"}), \
+             mock.patch.object(image_search, "provider_order", return_value=["openverse"]), \
+             mock.patch.object(image_search, "create_session", return_value=Session()), \
+             mock.patch.object(image_search, "search_serpapi") as paid, \
+             mock.patch.object(image_search, "search_openverse", return_value=[candidate]), \
+             mock.patch.object(sys, "argv", [
+                 "image_search.py", "office", "--root", root,
+                 "--batch-size", "0", "--out", ".image-search/test",
+             ]), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(image_search.main(), 0)
+            paid.assert_not_called()
+
+    def test_wikimedia_commons_metadata(self):
+        payload = {"query": {"pages": [{
+            "index": 1, "title": "File:Lake photo.jpg",
+            "imageinfo": [{
+                "url": "https://upload.wikimedia.org/wikipedia/commons/a/a1/lake.jpg",
+                "descriptionurl": "https://commons.wikimedia.org/wiki/File:Lake_photo.jpg",
+                "mime": "image/jpeg", "width": 1600, "height": 1000,
+                "extmetadata": {
+                    "LicenseShortName": {"value": "CC BY-SA 4.0"},
+                    "LicenseUrl": {"value": "https://creativecommons.org/licenses/by-sa/4.0/"},
+                },
+            }],
+        }]}}
+        session = Session(payload)
+        images = image_search.search_wikimedia(
+            session, "lake", 10, 1, "wide", "any",
+            "any", "active", "any", "any", "any",
+        )
+        self.assertEqual(len(images), 1)
+        self.assertEqual(images[0].provider, "wikimedia-commons")
+        self.assertEqual(images[0].license_tag, "CC BY-SA 4.0")
+        self.assertEqual(images[0].source_domain, "commons.wikimedia.org")
+        self.assertEqual(session.calls[0][1]["params"]["gsrnamespace"], 6)
+
+    def test_wikimedia_rejects_license_claims_it_cannot_verify(self):
+        with self.assertRaises(common.SkillError):
+            image_search.search_wikimedia(
+                Session(), "lake", 10, 1, "any", "any",
+                "commercial-modify", "active", "any", "any", "any",
+            )
+
 
 
 class SafetyTests(unittest.TestCase):
@@ -208,6 +267,14 @@ class SafetyTests(unittest.TestCase):
             private = root / ".image-search/provenance/public/images/hero.webp.source.json"
             self.assertTrue(private.exists())
             self.assertEqual(json.loads(private.read_text())["candidate_id"], "img-safe")
+
+    def test_private_workdir_has_nested_gitignore(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            private = common.prepare_private_workdir(root)
+            ignored = (private / ".gitignore").read_text(encoding="utf-8")
+            self.assertEqual(ignored, "*\n!.gitignore\n")
+            self.assertEqual(common.prepare_private_workdir(root), private)
 
     def test_traversal_rejected(self):
         with tempfile.TemporaryDirectory() as folder:

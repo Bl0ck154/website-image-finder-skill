@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from common import VERSION, SkillError, atomic_write_json, ensure_within_root, resolve_under_root
+from common import VERSION, SkillError, atomic_write_json, ensure_within_root, resolve_under_root, prepare_private_workdir
 
 
 def parse_args() -> argparse.Namespace:
@@ -83,6 +83,7 @@ def main() -> int:
         root = Path(args.root).resolve()
         if not root.is_dir():
             raise SkillError(f"project root does not exist: {root}")
+        prepare_private_workdir(root)
         source, candidate, manifest_path = resolve_source(args, root)
         target = resolve_under_root(args.output, root, label="output")
         if not source.is_file():

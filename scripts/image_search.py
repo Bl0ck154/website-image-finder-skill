@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -33,11 +34,13 @@ from common import (
     unicode_words,
     validate_public_url,
     validate_remote_url_syntax,
+    prepare_private_workdir,
 )
 
-USER_AGENT = "WebsiteImageFinder/0.2.1 (+Agent Skill; image asset research)"
+USER_AGENT = "WebsiteImageFinder/0.4.0 (https://github.com/Bl0ck154/website-image-finder-skill)"
 SERPAPI_ENDPOINT = "https://serpapi.com/search.json"
 OPENVERSE_ENDPOINT = "https://api.openverse.org/v1/images/"
+WIKIMEDIA_ENDPOINT = "https://commons.wikimedia.org/w/api.php"
 MAX_REDIRECTS = 5
 CACHE_FILENAME = "results-cache.json"
 DDGS_SOURCE_NAMES = {"bing": "Bing", "duckduckgo": "DuckDuckGo"}
@@ -528,6 +531,83 @@ def search_openverse(
         if candidate:
             result.append(candidate)
     return result
+
+
+def search_wikimedia(
+    session: Any, query: str, max_results: int, page: int,
+    orientation: str, image_type: str, license_filter: str,
+    safe_search: str, size: str, color: str, time_limit: str,
+) -> list[Candidate]:
+    """Keyless Wikimedia Commons fallback. Local selection and manual license review are required."""
+    if license_filter != "any":
+        raise SkillError("Wikimedia fallback does not guarantee requested license filters; use Openverse")
+    if image_type not in {"any", "photo"} or color != "any" or time_limit != "any":
+        raise SkillError("Wikimedia fallback does not support image type, color or time filters")
+    if size not in {"any", "small", "medium", "large"}:
+        raise SkillError("Wikimedia fallback cannot honor the requested size filter")
+    limit = min(max_results, 25)
+    params = {
+        "action": "query",
+        "format": "json",
+        "formatversion": "2",
+        "generator": "search",
+        "gsrsearch": query,
+        "gsrnamespace": 6,
+        "gsrlimit": limit,
+        "gsroffset": (page - 1) * limit,
+        "prop": "imageinfo",
+        "iiprop": "url|size|mime|extmetadata",
+    }
+    response = session.get(WIKIMEDIA_ENDPOINT, params=params, timeout=(10, 35))
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise SkillError(f"Wikimedia HTTP {response.status_code}: non-JSON response") from exc
+    if response.status_code >= 400 or not isinstance(payload, dict) or payload.get("error"):
+        raise SkillError(f"Wikimedia HTTP {response.status_code}: search unavailable")
+    pages = payload.get("query", {}).get("pages", [])
+    if not isinstance(pages, list):
+        raise SkillError("Wikimedia returned unexpected search payload")
+    results: list[Candidate] = []
+    for item in sorted(pages, key=lambda value: value.get("index", 100000)):
+        details = item.get("imageinfo", [])
+        if not details or not isinstance(details[0], dict):
+            continue
+        info = details[0]
+        mime = str(info.get("mime") or "").lower()
+        if not mime.startswith("image/") or mime in {"image/svg+xml", "image/vnd.djvu"}:
+            continue
+        try:
+            image_url = safe_result_url(info.get("url"), required=True)
+        except SkillError:
+            continue
+        width = int_or_none(info.get("width"))
+        height = int_or_none(info.get("height"))
+        if width and height:
+            ratio = width / max(height, 1)
+            if ((orientation == "wide" and ratio < 1.25) or
+                (orientation == "tall" and ratio > 0.8) or
+                (orientation == "square" and not 0.85 <= ratio <= 1.18)):
+                continue
+        if size == "large" and (not width or width < 1200):
+            continue
+        metadata = info.get("extmetadata") or {}
+        def meta(key: str) -> str:
+            value = metadata.get(key) or {}
+            return str(value.get("value") or "").strip() if isinstance(value, dict) else ""
+        page_url = safe_result_url(info.get("descriptionurl"))
+        license_url = safe_result_url(meta("LicenseUrl")) or None
+        title = str(item.get("title") or "").removeprefix("File:").strip()
+        key = hashlib.sha1(canonical_url(image_url).encode("utf-8", "replace")).hexdigest()[:12]
+        results.append(Candidate(
+            id=f"img-{key}", rank=len(results) + 1, provider="wikimedia-commons",
+            provider_position=len(results) + 1, queries=[query], title=title,
+            image_url=image_url, thumbnail_url="", source_page_url=page_url,
+            source_domain=domain_of(page_url), source_label="Wikimedia Commons",
+            reported_width=width, reported_height=height,
+            license_url=license_url, license_tag=meta("LicenseShortName") or None,
+        ))
+    return results
 
 
 def score_candidate(candidate: Candidate, preferred_domains: list[str], orientation: str) -> float:
@@ -1059,18 +1139,31 @@ def find_reusable_cache(
     return max(matches, key=lambda item: item[0])[1]
 
 
+def provider_order(requested: str, license_filter: str, no_fallback: bool, *, ddgs_available: bool | None = None) -> list[str]:
+    """Explicit paid providers are opt-in; automatic search never uses paid APIs."""
+    if requested != "auto":
+        return [requested]
+    # License-restricted queries must not silently fall through to unverified licenses.
+    if license_filter in {"creative-commons", "commercial", "modify", "commercial-modify"}:
+        return ["openverse"]
+    if ddgs_available is None:
+        ddgs_available = importlib.util.find_spec("ddgs") is not None
+    chain = ["ddgs", "openverse", "wikimedia"] if ddgs_available else ["openverse", "wikimedia"]
+    return chain[:1] if no_fallback else chain
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("query", help="Primary image-search query")
     parser.add_argument("--extra-query", action="append", default=[], help="Additional query; repeatable")
-    parser.add_argument("--provider", choices=["auto", "serpapi", "ddgs", "openverse"], default="auto")
+    parser.add_argument("--provider", choices=["auto", "serpapi", "ddgs", "openverse", "wikimedia"], default="auto", help="auto uses free sources only; SerpApi is opt-in")
     parser.add_argument("--no-provider-fallback", action="store_true", help="Do not fall back between search providers")
     parser.add_argument("--ddgs-backend", choices=["auto", "bing", "duckduckgo"], default="auto")
     parser.add_argument("--root", default=".", help="Project root; output must stay inside it")
     parser.add_argument("--out", default=None, help="Output directory; default is .image-search/<slug>-<UTC timestamp>")
     parser.add_argument("--overwrite-output", action="store_true", help="Allow a non-empty output directory")
     parser.add_argument("--max-results", type=int, default=60, help="Maximum results requested per query per page")
-    parser.add_argument("--reuse-cache-hours", type=int, default=0, help="Reuse matching search results from prior runs up to N hours old (0 disables)")
+    parser.add_argument("--reuse-cache-hours", type=int, default=24, help="Reuse matching search results from prior runs up to N hours old (default 24; 0 disables)")
     parser.add_argument("--max-serpapi-requests", type=int, default=3, help="Prevent accidental paid search spikes; increase explicitly for multi-page searches")
     parser.add_argument("--pages", type=int, default=1, help="Number of result pages per query (1-3; each SerpApi page may use a search credit)")
     parser.add_argument("--page", type=int, default=1, help="Starting provider page, 1-based")
@@ -1142,6 +1235,7 @@ def main() -> int:
         root = Path(args.root).resolve()
         if not root.is_dir():
             raise SkillError(f"project root does not exist: {root}")
+        prepare_private_workdir(root)
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         default_out = Path(".image-search") / f"{slugify(args.query)}-{timestamp}"
         out_dir = resolve_under_root(args.out if args.out else default_out, root, label="output directory")
@@ -1163,13 +1257,10 @@ def main() -> int:
 
         api_key = (os.environ.get("SERPAPI_API_KEY") or os.environ.get("SERPAPI_KEY") or "").strip()
         requested_provider = args.provider
-        primary_provider = requested_provider
-        if primary_provider == "auto":
-            primary_provider = "openverse" if args.license_filter == "creative-commons" else ("serpapi" if api_key else "ddgs")
-        if primary_provider == "serpapi" and not api_key:
-            if requested_provider == "serpapi":
-                raise SkillError("SERPAPI_API_KEY or SERPAPI_KEY is required for --provider serpapi")
-            primary_provider = "ddgs"
+        provider_chain = provider_order(requested_provider, args.license_filter, args.no_provider_fallback)
+        primary_provider = provider_chain[0]
+        if requested_provider == "serpapi" and not api_key:
+            raise SkillError("SERPAPI_API_KEY or SERPAPI_KEY is required for --provider serpapi")
 
         search_settings = {
             "region": args.region,
@@ -1188,6 +1279,7 @@ def main() -> int:
             "blocked_domains": blocked_domains,
             "ddgs_backend": args.ddgs_backend,
             "no_provider_fallback": args.no_provider_fallback,
+            "provider_policy": "free-first-v1",
         }
         reused_payload = find_reusable_cache(
             root, queries, search_settings, requested_provider, args.reuse_cache_hours, out_dir
@@ -1230,13 +1322,6 @@ def main() -> int:
             ddgs_actual_sources = list(reused_payload.get("actual_sources") or [])
             warnings_list.append("Reused matching cached provider results; no new search requests")
         else:
-            provider_chain = [primary_provider]
-            if requested_provider == "auto" and not args.no_provider_fallback:
-                if primary_provider == "serpapi":
-                    provider_chain.extend(["ddgs", "openverse"])
-                elif primary_provider == "ddgs":
-                    provider_chain.append("openverse")
-
             for query in queries:
                 query_results: list[Candidate] = []
                 for page in range(args.page, args.page + args.pages):
@@ -1254,8 +1339,14 @@ def main() -> int:
                                     args.orientation, args.image_type, args.license_filter,
                                     args.safe_search, args.size, args.color, args.time_limit,
                                 ))
-                            else:
+                            elif provider == "openverse":
                                 found = search_openverse(
+                                    session, query, args.max_results, page, args.orientation,
+                                    args.image_type, args.license_filter, args.safe_search,
+                                    args.size, args.color, args.time_limit,
+                                )
+                            else:
+                                found = search_wikimedia(
                                     session, query, args.max_results, page, args.orientation,
                                     args.image_type, args.license_filter, args.safe_search,
                                     args.size, args.color, args.time_limit,
@@ -1263,6 +1354,11 @@ def main() -> int:
                             if provider not in providers_used:
                                 providers_used.append(provider)
                             if found:
+                                if provider == "wikimedia":
+                                    warnings_list.append(
+                                        "Wikimedia Commons does not provide provider-side safe search; "
+                                        "review every candidate and verify image licenses."
+                                    )
                                 query_results.extend(found)
                                 break
                             warnings_list.append(f"{query} page {page}: {provider} returned no images")

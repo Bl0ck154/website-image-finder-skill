@@ -1,6 +1,6 @@
 interface:
   display_name: "Website Image Finder"
-  short_description: "Find, review and optimize web images for sites"
-  default_prompt: "Find suitable real web images for this website. Prefer Openverse for license-oriented searches, review candidate contact sheets, keep source metadata in private project storage, optimize the selected image and integrate it using existing project conventions. Verify licensing before publication and check the rendered page."
+  short_description: "Free-first web image search and website assets"
+  default_prompt: "Find real images for this website with the free search providers first. Review a contact sheet, verify source rights, optimize the best candidate and integrate it using project conventions. The Python launcher can prepare dependencies on first use. Never use SerpApi without an explicit request."
 policy:
   allow_implicit_invocation: true

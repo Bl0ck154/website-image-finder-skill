@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 SECRET_NAMES = ("SERPAPI_API_KEY", "SERPAPI_KEY")
 
 
@@ -64,6 +64,16 @@ def resolve_under_root(value: str | Path, root: Path, *, label: str = "path") ->
     if not path.is_absolute():
         path = root / path
     return ensure_within_root(path, root, label=label)
+
+
+def prepare_private_workdir(root: Path) -> Path:
+    """Keep cached third-party URLs and optional Python dependencies out of git adds."""
+    folder = ensure_within_root(root / ".image-search", root, label="private image-search directory")
+    folder.mkdir(parents=True, exist_ok=True)
+    ignore = folder / ".gitignore"
+    if not ignore.exists():
+        atomic_write_text(ignore, "*\n!.gitignore\n")
+    return folder
 
 
 def normalize_domain(value: str) -> str:
