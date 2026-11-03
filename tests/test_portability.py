@@ -132,6 +132,56 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual((len(found), attempts), (1, 1))
 
 
+    def test_reuse_cached_search_across_runs(self):
+        candidate = image_search.make_openverse_candidate("office", 1, result())
+        with tempfile.TemporaryDirectory() as root, \
+             mock.patch.object(image_search, "create_session", return_value=Session()), \
+             mock.patch.object(image_search, "search_openverse", return_value=[candidate]) as provider, \
+             contextlib.redirect_stdout(io.StringIO()), \
+             contextlib.redirect_stderr(io.StringIO()):
+            first = [
+                "image_search.py", "office", "--provider", "openverse",
+                "--root", root, "--batch-size", "0", "--out", ".image-search/first",
+            ]
+            second = [
+                "image_search.py", "office", "--provider", "openverse",
+                "--root", root, "--batch-size", "0", "--out", ".image-search/second",
+                "--reuse-cache-hours", "24",
+            ]
+            with mock.patch.object(sys, "argv", first):
+                self.assertEqual(image_search.main(), 0)
+            with mock.patch.object(sys, "argv", second):
+                self.assertEqual(image_search.main(), 0)
+            self.assertEqual(provider.call_count, 1)
+            cache = json.loads((Path(root) / ".image-search/second/results-cache.json").read_text())
+            self.assertEqual(len(cache["results"]), 1)
+            self.assertEqual(cache["results"][0]["status"], "found")
+
+    def test_paid_serpapi_request_cap_rejects_expensive_search(self):
+        with tempfile.TemporaryDirectory() as root, \
+             mock.patch.dict("os.environ", {"SERPAPI_API_KEY": "dummy-value"}), \
+             mock.patch.object(image_search, "create_session") as client, \
+             mock.patch.object(sys, "argv", [
+                 "image_search.py", "office", "--extra-query", "garden",
+                 "--root", root, "--batch-size", "0", "--pages", "3",
+             ]), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(image_search.main(), 2)
+            client.assert_not_called()
+
+    def test_no_fallback_uses_only_selected_provider(self):
+        with tempfile.TemporaryDirectory() as root, \
+             mock.patch.dict("os.environ", {"SERPAPI_API_KEY": "", "SERPAPI_KEY": ""}), \
+             mock.patch.object(image_search, "create_session", return_value=Session()), \
+             mock.patch.object(image_search, "search_ddgs", side_effect=RuntimeError("blocked")), \
+             mock.patch.object(image_search, "search_openverse") as fallback, \
+             mock.patch.object(sys, "argv", [
+                 "image_search.py", "office", "--root", root, "--batch-size", "0",
+                 "--no-provider-fallback", "--out", ".image-search/test",
+             ]), contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(image_search.main(), 1)
+            fallback.assert_not_called()
+
+
 class SafetyTests(unittest.TestCase):
     def test_private_provenance_when_finalizing_public_image(self):
         with tempfile.TemporaryDirectory() as folder:
