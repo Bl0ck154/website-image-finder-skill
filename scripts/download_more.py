@@ -10,7 +10,7 @@ from typing import Any
 
 from review_candidates import save_review_report
 
-from common import SkillError, atomic_write_json, redact, resolve_under_root, prepare_private_workdir
+from common import SkillError, atomic_write_json, redact, resolve_under_root, ensure_within_root, prepare_private_workdir
 from image_search import (
     CACHE_FILENAME,
     cache_summary,
@@ -59,7 +59,14 @@ def main() -> int:
         if not root.is_dir():
             raise SkillError(f"project root does not exist: {root}")
         prepare_private_workdir(root)
-        run_dir = resolve_under_root(args.run, root, label="search run directory")
+        private_root = resolve_under_root(".image-search", root)
+        run_dir = ensure_within_root(
+            resolve_under_root(args.run, root, label="search run directory"),
+            private_root,
+            label="private search run directory",
+        )
+        if run_dir == private_root:
+            raise SkillError("--run must refer to an individual private search run")
         if not run_dir.is_dir():
             raise SkillError(f"search run directory does not exist: {run_dir}")
         cache_path = run_dir / CACHE_FILENAME

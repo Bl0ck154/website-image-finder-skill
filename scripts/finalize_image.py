@@ -53,7 +53,11 @@ def resolve_source(args: argparse.Namespace, root: Path) -> tuple[Path, dict[str
         return source, None, None
     if not args.candidate:
         raise SkillError("--candidate is required with --cache")
-    manifest_path = resolve_under_root(str(args.cache), root, label="search cache")
+    private = resolve_under_root(".image-search", root, label="private image-search directory")
+    manifest_path = ensure_within_root(
+        resolve_under_root(str(args.cache), root, label="search cache"),
+        private, label="private search cache",
+    )
     try:
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -62,7 +66,21 @@ def resolve_source(args: argparse.Namespace, root: Path) -> tuple[Path, dict[str
     local_file = candidate.get("local_file")
     if not local_file or candidate.get("status") != "downloaded":
         raise SkillError("selected candidate has no downloaded local file")
-    source = ensure_within_root(manifest_path.parent / str(local_file), root, label="candidate file")
+    # Newer caches keep downloaded original bytes separately from their WebP
+    # review previews. Prefer those originals to avoid a second lossy encode.
+    original = candidate.get("original_file")
+    original_path = (
+        ensure_within_root(manifest_path.parent / str(original), manifest_path.parent,
+                           label="original candidate file")
+        if original else None
+    )
+    if original_path is not None and original_path.is_file():
+        source = original_path
+    else:
+        source = ensure_within_root(
+            manifest_path.parent / str(local_file), manifest_path.parent,
+            label="candidate preview",
+        )
     return source, candidate, manifest_path
 
 
