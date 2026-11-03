@@ -115,15 +115,25 @@ def prepared_python(args: list[str], *, allow_install: bool) -> Path | None:
     return None
 
 
-def check() -> int:
+def check(args: list[str] | None = None) -> int:
+    args = args or []
     for name, label in (("requests", "requests"), ("PIL", "Pillow"), ("ddgs", "DDGS (optional)")):
         print(("OK" if importlib.util.find_spec(name) else "INFO") + ": " + label)
-    print("OK: current Python can download/process images" if current_python_ready()
-          else "INFO: Python dependencies are missing; the next search can install them automatically")
+    ready = current_python_ready()
+    if ready:
+        print("OK: current Python can download/process images")
+    else:
+        for folder in environment_locations(["check", *args]):
+            if python_works(managed_python(folder)):
+                ready = True
+                print("OK: isolated Python is ready at " + str(managed_python(folder)))
+                break
+    if not ready:
+        print("INFO: dependencies missing; run setup or let the next search install them automatically")
     has_key = bool((os.environ.get("SERPAPI_API_KEY") or os.environ.get("SERPAPI_KEY") or "").strip())
     print("INFO: SerpApi key " + ("is configured (paid search still requires --provider serpapi)"
                                   if has_key else "is not configured; no key is needed for free search"))
-    return 0 if current_python_ready() else 2
+    return 0 if ready else 2
 
 
 def main() -> int:
@@ -139,7 +149,7 @@ def main() -> int:
         return 0
     command = sys.argv[1]
     if command == "check":
-        return check()
+        return check(sys.argv[2:])
     if command != "setup" and command not in COMMANDS:
         print("Unknown command: " + command, file=sys.stderr)
         return 2
