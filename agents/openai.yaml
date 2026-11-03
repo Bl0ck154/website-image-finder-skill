@@ -1,6 +1,6 @@
 interface:
   display_name: "Website Image Finder"
-  short_description: "Find and add web images to a website"
-  default_prompt: "Find suitable public-web images for this website, review cached candidate batches, preserve source metadata, optimize the best usable image, add it using the project's existing conventions, and verify the result."
+  short_description: "Find, review and optimize web images for sites"
+  default_prompt: "Find suitable real web images for this website. Prefer Openverse for license-oriented searches, review candidate contact sheets, keep source metadata in private project storage, optimize the selected image and integrate it using existing project conventions. Verify licensing before publication and check the rendered page."
 policy:
   allow_implicit_invocation: true
